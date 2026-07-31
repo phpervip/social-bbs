@@ -81,7 +81,7 @@ export default function Layout() {
         </form>
         <div className="layout__right-card">
           <h4>关于 B</h4>
-          <p>简化版 X.com — 微服务学习演示项目。</p>
+          <p>简化版 社交平台 — 微服务学习演示项目。</p>
         </div>
       </aside>
     </div>
