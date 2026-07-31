@@ -1,0 +1,168 @@
+<h2>🏗️ 总体架构 — 简化版 X.com（修正版）</h2>
+<p class="subtitle">方案 A：真·微服务 · 双链路入口 · 彩色连线说明</p>
+
+<style>
+  .legend { display: flex; gap: 2rem; justify-content: center; margin-bottom: 1.5rem; padding: 0.75rem; background: #0f3460; border-radius: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: #ccc; }
+  .legend-line { width: 30px; height: 3px; border-radius: 2px; }
+  .legend-line.solid-blue { background: #4a9eff; }
+  .legend-line.dashed-orange { background: transparent; border-top: 3px dashed #ff8c42; }
+  .flow-group { border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background: #0d1b2a; }
+  .flow-group-title { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem; }
+  .flow-row { display: flex; align-items: center; justify-content: center; gap: 0.4rem; flex-wrap: wrap; margin: 0.3rem 0; }
+  .sync-arrow { color: #4a9eff; font-size: 1.1rem; font-weight: bold; }
+  .async-arrow { color: #ff8c42; font-size: 1.1rem; }
+  .node { background: #16213e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.6rem 1rem; text-align: center; min-width: 100px; }
+  .node h4 { font-size: 0.85rem; color: #fff; margin-bottom: 0.15rem; }
+  .node p { font-size: 0.7rem; color: #888; }
+  .node.highlight { border-color: #6c63ff; background: #1f2a50; }
+  .node.static { border-color: #4a9eff; }
+  .node.async { border-color: #ff8c42; }
+  .node.gateway { border-color: #6c63ff; }
+  .tag { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; margin-left: 0.3rem; }
+  .tag.blue { background: #1a3a6a; color: #4a9eff; }
+  .tag.orange { background: #3a2a1a; color: #ff8c42; }
+  .tag.green { background: #1a3a2a; color: #4caf50; }
+  .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; }
+  .sync-line { border-left: 3px solid #4a9eff; padding-left: 0.75rem; margin: 0.5rem 0; }
+  .async-line { border-left: 3px dashed #ff8c42; padding-left: 0.75rem; margin: 0.5rem 0; }
+</style>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-line solid-blue"></div> 同步请求 (HTTP/gRPC)</div>
+  <div class="legend-item"><div class="legend-line dashed-orange"></div> 异步事件 (Kafka)</div>
+</div>
+
+  <div class="flow-group">
+  <div class="flow-group-title">❶ 静态资源链路</div>
+  <div class="flow-row">
+    <div class="node static"><h4>🌐 Browser</h4><p>React SPA</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node static"><h4>⚡ Imperva CDN</h4><p>静态资源加速<span class="tag blue">HTTP</span></p></div>
+  </div>
+  <div style="text-align:center;margin-top:0.5rem;font-size:0.75rem;color:#aaa;background:#0a1428;padding:0.4rem;border-radius:6px;border:1px dashed #2a2a5a">
+    React SPA 基于 Module Federation：<strong style="color:#6c63ff">Shell(Host基座)</strong> + <span style="color:#4a9eff">User/Feed/Video Remote子应用</span>
+  </div>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❷ API 动态请求链路</div>
+  <div class="flow-row">
+    <div class="node static"><h4>🌐 Browser</h4><p>React SPA</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node"><h4>🔄 Nginx (Ingress)</h4><p>SSL / 反向代理<span class="tag blue">HTTP</span></p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node gateway"><h4>🚪 API Gateway</h4><p>Node.js (Fastify)<span class="tag blue">HTTP</span></p></div>
+  </div>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❸ API Gateway → 后端微服务（内网同步通信）</div>
+  <div class="sync-line">
+    <div class="flow-row">
+      <div class="node gateway"><h4>🚪 API Gateway</h4><p>Node.js (Fastify)</p></div>
+      <span class="sync-arrow">─ ─ →</span>
+      <div class="node"><h4>👤 User Service</h4><p>Java + Spring Boot<span class="tag blue">gRPC</span></p></div>
+    </div>
+    <div class="flow-row">
+      <div class="node gateway" style="visibility:hidden;min-width:100px"><h4> </h4><p> </p></div>
+      <span class="sync-arrow">─ ─ →</span>
+      <div class="node"><h4>📰 Feed Service</h4><p>Go<span class="tag blue">gRPC</span></p></div>
+    </div>
+    <div class="flow-row">
+      <div class="node gateway" style="visibility:hidden;min-width:100px"><h4> </h4><p> </p></div>
+      <span class="sync-arrow">─ ─ →</span>
+      <div class="node"><h4>🎬 Video Service</h4><p>Go<span class="tag blue">gRPC</span></p></div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❹ Kafka 异步事件总线</div>
+  <div class="async-line">
+    <div class="flow-row">
+      <div class="node async"><h4>📨 Kafka</h4><p>事件总线</p></div>
+      <span class="async-arrow">⟵ 事件源 ──</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;justify-content:center;margin:0.5rem 0">
+      <span class="tech-tag" style="border-color:#ff8c42">📰 Feed 动态事件</span>
+      <span class="tech-tag" style="border-color:#ff8c42">🎬 视频转码任务</span>
+      <span class="tech-tag" style="border-color:#ff8c42">👤 用户变更事件</span>
+      <span class="tech-tag" style="border-color:#ff8c42">🗄️ MySQL 数据变更 → ES 同步</span>
+    </div>
+    <div class="flow-row">
+      <span class="async-arrow">⟶ 消费者 ──</span>
+    </div>
+    <div class="flow-row">
+      <div class="node"><h4>🔔 Notification</h4><p>Node.js Consumer</p></div>
+      <div class="node"><h4>📊 Analytics</h4><p>数据分析<span class="tag orange">Kafka</span></p></div>
+      <div class="node"><h4>🔍 ES Sync</h4><p>MySQL→ES 同步<span class="tag orange">Kafka</span></p></div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❺ 数据层（各服务独立实例）</div>
+  <div class="data-grid">
+    <div class="node"><h4>🗄️ MySQL</h4><p>分库独立实例：User库<br>Feed库、Video库</p></div>
+    <div class="node"><h4>⚡ Redis</h4><p>Session / Timeline 缓存</p></div>
+    <div class="node"><h4>🔍 Elasticsearch</h4><p>仅用于全文检索<br>MySQL→Kafka→ES 同步<br>不作为主写入存储</p></div>
+    <div class="node"><h4>☁️ S3</h4><p>图片 + 视频原文件</p></div>
+  </div>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❻ 视频完整流程</div>
+  <div class="flow-row">
+    <div class="node"><h4>🎬 前端上传</h4><p>HTTP 分片</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node"><h4>Video Service</h4><p>Go</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node"><h4>☁️ S3 原文件</h4><p>原始视频</p></div>
+    <span class="async-arrow">─ ─ →</span>
+    <div class="node async"><h4>📨 Kafka</h4><p>转码任务</p></div>
+    <span class="async-arrow">─ ─ →</span>
+    <div class="node"><h4>🎞️ HLS 切片</h4><p>FFmpeg</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node"><h4>☁️ S3 HLS</h4><p>ts + m3u8</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node"><h4>📺 CDN</h4><p>HLS 分发</p></div>
+  </div>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❼ WebSocket 实时推送</div>
+  <div class="flow-row">
+    <div class="node"><h4>🔔 Notification</h4><p>Node.js Consumer</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node gateway"><h4>🚪 API Gateway</h4><p>WebSocket 代理</p></div>
+    <span class="sync-arrow" style="color:#4caf50">⟷</span>
+    <div class="node static"><h4>🌐 Browser</h4><p>WS 客户端</p></div>
+  </div>
+  <p style="text-align:center;font-size:0.75rem;color:#666;margin-top:0.5rem">通知通过 Gateway 建立 WebSocket 长连接推送实时消息</p>
+</div>
+
+<div class="flow-group">
+  <div class="flow-group-title">❽ 部署 (Kind K8s)</div>
+  <div class="flow-row">
+    <div class="node"><h4>📦 Kind Cluster</h4><p>K8s in Docker</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node"><h4>📋 Ingress-NGINX</h4><p>集群入口</p></div>
+    <span class="sync-arrow">→</span>
+    <div class="node gateway"><h4>🚪 API Gateway</h4><p>Node.js Pod</p></div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:0.5rem;justify-content:center;margin-top:0.75rem">
+    <span class="tech-tag" style="border-color:#6c63ff">👤 User Service Pod</span>
+    <span class="tech-tag" style="border-color:#6c63ff">📰 Feed Service Pod</span>
+    <span class="tech-tag" style="border-color:#6c63ff">🎬 Video Service Pod</span>
+    <span class="tech-tag" style="border-color:#6c63ff">🔔 Notification Pod</span>
+    <span class="tech-tag" style="border-color:#4caf50">🗄️ MySQL StatefulSet</span>
+    <span class="tech-tag" style="border-color:#4caf50">⚡ Redis Pod</span>
+    <span class="tech-tag" style="border-color:#4caf50">🔍 ES StatefulSet</span>
+    <span class="tech-tag" style="border-color:#ff8c42">📨 Kafka (Strimzi)</span>
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1.5rem">
+  <span>✅ 所有修正已应用 — 浏览器刷新查看 ➡️</span>
+</div>

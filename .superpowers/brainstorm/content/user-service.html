@@ -1,0 +1,149 @@
+<h2>👤 User Service 详细设计</h2>
+<p class="subtitle">Java + Spring Boot · Controller → Service → Repository · 对外 gRPC · Kafka · 数据库 · 缓存</p>
+
+<style>
+  .svc-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .svc-box { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .svc-box h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.75rem; }
+  .layer-stack { display: flex; flex-direction: column; gap: 0.4rem; }
+  .layer { border: 1px solid #2a2a4a; border-radius: 6px; background: #16213e; }
+  .layer-title { padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; color: #fff; border-bottom: 1px solid #2a2a4a; border-radius: 6px 6px 0 0; }
+  .layer-body { padding: 0.5rem 0.75rem; font-size: 0.72rem; color: #999; }
+  .layer-body .fn { color: #4a9eff; font-family: monospace; }
+  .layer-body .consumer { color: #ff8c42; font-family: monospace; }
+  .layer-body .producer { color: #4caf50; font-family: monospace; }
+  .layer.controller .layer-title { background: #1a2a4a; }
+  .layer.service .layer-title { background: #1a3a2a; }
+  .layer.repository .layer-title { background: #3a2a1a; }
+  .dep-item { display: flex; align-items: center; gap: 0.5rem; background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.75rem; color: #ccc; }
+  .dep-item .conn { color: #4a9eff; font-family: monospace; font-size: 0.7rem; }
+  .dep-item .conn.async { color: #ff8c42; }
+  .table-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; }
+  .table-item .tname { font-family: monospace; font-size: 0.78rem; color: #fff; }
+  .table-item .tcols { font-size: 0.68rem; color: #888; margin-top: 0.25rem; }
+  .table-item .tag-pk { color: #4a9eff; } .table-item .tag-fk { color: #ff8c42; } .table-item .tag-idx { color: #4caf50; }
+  .redis-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.72rem; }
+  .redis-item .rkey { font-family: monospace; font-size: 0.75rem; color: #fff; }
+  .redis-item .rtype { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #1a3a2a; color: #4caf50; margin-left: 0.4rem; }
+  .redis-item .rtype.ttl { background: #3a2a1a; color: #ff8c42; }
+  .legend-mini { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.7rem; color: #888; margin: 0.5rem 0; }
+  .legend-mini span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -2px; }
+  .lg-grpc { background: #4a9eff; } .lg-kafka-p { background: #4caf50; } .lg-kafka-c { background: #ff8c42; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.5rem">
+  <div class="node gateway" style="min-width:90px"><h4>🚪 Gateway</h4><p>gRPC 调用</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node highlight" style="min-width:110px"><h4>👤 User Service</h4><p>Java + Spring Boot</p></div>
+  <span class="async-arrow">─ ─ →</span>
+  <div class="node async" style="min-width:90px"><h4>📨 Kafka</h4><p>事件</p></div>
+</div>
+
+<div class="legend-mini">
+  <span><span class="lg-grpc"></span>对外 gRPC 接口</span>
+  <span><span class="lg-kafka-p"></span>生产 Kafka 事件</span>
+  <span><span class="lg-kafka-c"></span>消费 Kafka 事件</span>
+</div>
+
+<div class="svc-layout">
+  <!-- 左列：内部三层 -->
+  <div class="svc-box">
+    <h3>内部三层架构</h3>
+    <div class="layer-stack">
+      <div class="layer controller">
+        <div class="layer-title">Controller 层 <span style="color:#4a9eff;font-size:0.65rem">(gRPC 入口)</span></div>
+        <div class="layer-body">
+          <span class="fn">UserServiceGrpc</span> — Register / Login / GetProfile / UpdateProfile / Follow / Unfollow / GetFollowers / GetFollowing<br>
+          <span style="color:#666">仅做参数校验 + 协议转换，无业务逻辑</span>
+        </div>
+      </div>
+      <div class="layer service">
+        <div class="layer-title">Service 层 <span style="color:#4caf50;font-size:0.65rem">(业务核心)</span></div>
+        <div class="layer-body">
+          AuthService — 密码 BCrypt 加密、JWT 签发<br>
+          UserService — 资料 CRUD<br>
+          FollowService — 关注关系（写 MySQL + 发 Kafka）<br>
+          <span class="producer">➤ 生产 user:registered</span><br>
+          <span class="producer">➤ 生产 user:follow-changed</span>
+        </div>
+      </div>
+      <div class="layer repository">
+        <div class="layer-title">Repository 层 <span style="color:#ff8c42;font-size:0.65rem">(数据访问)</span></div>
+        <div class="layer-body">
+          MyBatis-Plus / JPA — 数据库操作<br>
+          Redis 缓存读写 — 关注列表、用户资料缓存<br>
+          <span style="color:#666">事务边界：关注操作在本地事务内完成 MySQL 写入</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右列：外部依赖 -->
+  <div class="svc-box">
+    <h3>外部依赖</h3>
+    <div class="dep-item"><span class="conn">gRPC ⟷</span> Gateway — 接收 HTTP→gRPC 转发的用户请求</div>
+    <div class="dep-item"><span class="conn async">Kafka ➤</span> user:registered（注册成功）</div>
+    <div class="dep-item"><span class="conn async">Kafka ➤</span> user:follow-changed（关注变更）</div>
+    <div class="dep-item"><span class="conn">MySQL ⟷</span> user_db（独立库）</div>
+    <div class="dep-item"><span class="conn">Redis ⟷</span> 缓存（Session / 关注列表 / 资料）</div>
+    <p style="font-size:0.7rem;color:#666;margin:0.5rem 0.2rem">缓存一致性策略：<strong style="color:#fff">更新数据库 → 删除 Redis 缓存</strong>，TTL 作为并发场景兜底方案</p>
+  </div>
+</div>
+
+<div class="svc-layout" style="grid-template-columns: 1fr 1fr">
+  <!-- 数据库表 -->
+  <div class="svc-box">
+    <h3>数据库表 (user_db)</h3>
+    <div class="table-item">
+      <span class="tname">users</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · username <span class="tag-idx">UNIQUE</span> · email <span class="tag-idx">UNIQUE</span> · password_hash · bio · avatar_url · created_at · updated_at</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">follows</span>
+      <div class="tcols"><span class="tag-pk">follower_id + followee_id PK</span> <span class="tag-fk">FK→users.id</span> · created_at</div>
+      <div style="font-size:0.65rem;color:#4caf50;margin-top:0.25rem">⚡ (user_id, followee_id) 联合唯一索引 → 关注操作天然幂等</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">user_sessions</span>
+      <div class="tcols"><span class="tag-pk">token_id PK</span> · user_id <span class="tag-fk">FK→users.id</span> · expires_at <span class="tag-idx">IDX</span> · revoked</div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">📱 管控多端登录、主动下线 · Redis Token 黑名单作为短期兜底方案，与网关共享</div>
+    </div>
+    <div style="font-size:0.68rem;color:#ff8c42;margin-top:0.5rem">⚠️ 演示环境使用数据库物理外键；正式生产环境移除物理外键，由业务代码维护关联完整性</div>
+  </div>
+
+  <!-- Redis 缓存策略 -->
+  <div class="svc-box">
+    <h3>Redis 缓存策略</h3>
+    <div class="redis-item">
+      <span class="rkey">user:profile:{id}</span><span class="rtype">String</span><span class="rtype ttl">TTL 10min</span>
+      <div style="color:#888;margin-top:0.2rem">用户资料热点缓存 · 更新数据库后删除缓存 · TTL 兜底并发场景</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">user:followers:{id}</span><span class="rtype">ZSet</span><span class="rtype ttl">TTL 5min</span>
+      <div style="color:#888;margin-top:0.2rem">粉丝列表 · ZRange 分页读取，规避大 key 风险</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">user:following:{id}</span><span class="rtype">ZSet</span><span class="rtype ttl">TTL 5min</span>
+      <div style="color:#888;margin-top:0.2rem">关注列表 · ZRange 分页读取，规避大 key 风险</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">auth:blacklist:{jti}</span><span class="rtype">String</span><span class="rtype ttl">TTL = JWT 剩余有效期</span>
+      <div style="color:#888;margin-top:0.2rem">登出 Token 黑名单 · 与 Gateway 共享</div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#4caf50;border-style:solid;margin-top:0.5rem">
+  <p style="font-size:0.8rem;color:#ccc"><strong>关注流程（事务 + 事件）：</strong></p>
+  <p style="font-size:0.72rem;color:#888;margin-top:0.3rem">
+    ① FollowService 在本地事务内写 follows 表 + 更新粉丝/关注数<br>
+    ② 事务提交成功后生产 <span style="color:#4caf50">user:follow-changed</span> 到 Kafka<br>
+    ③ 采用 <strong>事务监听机制</strong>（@TransactionalEventListener AFTER_COMMIT），事务提交后才发事件，降低消息丢失风险<br>
+    ④ Feed Service 消费该事件，更新关注者的时间线候选<br>
+    ⑤ 若事件生产失败，通过本地消息表兜底补偿重发
+  </p>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ User Service 是否符合预期？下一模块：Feed Service (Go)</span>
+</div>

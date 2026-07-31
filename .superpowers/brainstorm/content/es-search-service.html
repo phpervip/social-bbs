@@ -1,0 +1,210 @@
+<h2>🔍 ES 同步 & Search 检索模块</h2>
+<p class="subtitle">MySQL → Kafka → ES 异步同步 · 全文检索 · 一致性 · 增量同步 · 缓存降级</p>
+
+<style>
+  .svc-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .svc-box { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .svc-box h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.75rem; }
+  .layer-stack { display: flex; flex-direction: column; gap: 0.4rem; }
+  .layer { border: 1px solid #2a2a4a; border-radius: 6px; background: #16213e; }
+  .layer-title { padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; color: #fff; border-bottom: 1px solid #2a2a4a; border-radius: 6px 6px 0 0; }
+  .layer-body { padding: 0.5rem 0.75rem; font-size: 0.72rem; color: #999; }
+  .layer-body .fn { color: #4a9eff; font-family: monospace; }
+  .layer-body .producer { color: #4caf50; font-family: monospace; }
+  .layer-body .consumer { color: #ff8c42; font-family: monospace; }
+  .layer.handler .layer-title { background: #1a2a4a; }
+  .layer.service .layer-title { background: #1a3a2a; }
+  .layer.repository .layer-title { background: #3a2a1a; }
+  .dep-item { display: flex; align-items: center; gap: 0.5rem; background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.75rem; color: #ccc; }
+  .dep-item .conn { color: #4a9eff; font-family: monospace; font-size: 0.7rem; }
+  .dep-item .conn.async { color: #ff8c42; }
+  .redis-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.72rem; }
+  .redis-item .rkey { font-family: monospace; font-size: 0.75rem; color: #fff; }
+  .redis-item .rtype { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #1a3a2a; color: #4caf50; margin-left: 0.4rem; }
+  .redis-item .rtype.ttl { background: #3a2a1a; color: #ff8c42; }
+  .legend-mini { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.7rem; color: #888; margin: 0.5rem 0; }
+  .legend-mini span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -2px; }
+  .lg-grpc { background: #4a9eff; } .lg-kafka-p { background: #4caf50; } .lg-kafka-c { background: #ff8c42; }
+  .pipeline { background: #0d1b2a; border: 2px solid #6c63ff; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+  .pl-step { display: flex; gap: 0.75rem; margin: 0.5rem 0; align-items: flex-start; }
+  .pl-step .num { background: #6c63ff; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem; }
+  .pl-step .body { font-size: 0.75rem; color: #bbb; line-height: 1.5; }
+  .pl-step .body strong { color: #fff; }
+  .pl-step .body .mono { font-family: monospace; color: #4a9eff; }
+  .pl-step .body .async { font-family: monospace; color: #ff8c42; }
+  .mapping-box { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.6rem 0.75rem; margin: 0.4rem 0; font-family: monospace; font-size: 0.7rem; color: #aaa; line-height: 1.6; }
+  .mapping-box .f { color: #4a9eff; }
+  .mapping-box .t { color: #ff8c42; }
+  .mapping-box .c { color: #888; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.5rem">
+  <div class="node gateway" style="min-width:90px"><h4>🚪 Gateway</h4><p>gRPC 调用</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node highlight" style="min-width:110px"><h4>🔍 Search Service</h4><p>Go</p></div>
+  <span class="async-arrow">─ ─ ⟵</span>
+  <div class="node async" style="min-width:90px"><h4>📨 Kafka</h4><p>同步事件</p></div>
+</div>
+
+<div class="legend-mini">
+  <span><span class="lg-grpc"></span>对外 gRPC 接口</span>
+  <span><span class="lg-kafka-p"></span>生产 Kafka 事件</span>
+  <span><span class="lg-kafka-c"></span>消费 Kafka 事件</span>
+</div>
+
+<!-- ⭐ 同步链路 -->
+<div class="svc-box" style="border:2px solid #6c63ff;grid-column:1/-1">
+  <h3>⭐ MySQL → Kafka → ES 异步同步链路</h3>
+  <div class="pipeline">
+    <div class="pl-step">
+      <div class="num">1</div>
+      <div class="body"><strong>写入源：</strong>Feed Service 发帖/删帖/更新时，事务内写 MySQL + outbox_events（发件箱）→ Worker 投递 <span class="async">post:created / post:deleted / post:updated</span> 到 Kafka</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">2</div>
+      <div class="body"><strong>ES Sync Consumer：</strong>Search Service 消费同步事件（独立 consumer group: es-sync-group），解析 payload → 组装 ES 文档</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">3</div>
+      <div class="body"><strong>写入 ES：</strong><span class="mono">index()</span>（新增/更新）或 <span class="mono">delete()</span>（删除）→ 文档写入 posts 索引</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">4</div>
+      <div class="body"><strong>一致性保障：</strong>消费 Kafka 事件依靠<strong>业务唯一标识（biz_unique_id）实现幂等</strong>，防止重复消费造成 ES 文档错乱 · ES 写入失败 → 重试（有限次）+ 失败落 dead-letter 表，定时补偿任务重放 · 最终一致（秒级延迟）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">5</div>
+      <div class="body"><strong>增量同步兜底：</strong>定时（每 10min）扫描 MySQL 增量（<span class="mono">updated_at &gt; last_sync</span>），对比 ES 数据修复遗漏，保证长期一致性</div>
+    </div>
+  </div>
+  <div class="ws-box" style="margin-top:0.5rem">
+    <strong>⚠️ 一致性边界：</strong>本方案属于<strong>最终一致性架构</strong>，MySQL → ES 存在短暂同步延迟（秒级）。<span style="color:#4a9eff">强实时场景（如帖子详情、编辑后立即读取）直接读取 MySQL</span>，ES 仅服务搜索场景，不做强一致承诺。
+  </div>
+</div>
+
+<!-- ⭐ 检索实现 -->
+<div class="svc-box" style="border:2px solid #4a9eff;grid-column:1/-1">
+  <h3>⭐ 帖子全文检索 · 筛选 · 排序</h3>
+  <div class="mapping-box">
+    <span class="c">// posts 索引 Mapping（简化）</span><br>
+    <span class="f">content</span> <span class="t">text</span> <span class="c">(ik_max_word 中文分词 + standard 英文)</span><br>
+    <span class="f">author_id</span> <span class="t">keyword</span> · <span class="f">created_at</span> <span class="t">date</span> · <span class="f">like_count</span> <span class="t">long</span> · <span class="f">has_video</span> <span class="t">boolean</span> · <span class="f">media_type</span> <span class="t">keyword</span>
+    <div style="color:#ff8c42;margin-top:0.4rem">⚠️ 依赖备注：ES 需部署 <strong>IK 分词器</strong>插件（ik_max_word / ik_smart），保障中文全文检索效果；未部署则中文只能按单字/整词匹配</div>
+  </div>
+  <div class="pipeline">
+    <div class="pl-step">
+      <div class="num">1</div>
+      <div class="body"><strong>检索：</strong><span class="mono">multi_match</span> 对 content 全文检索（BM25 相关性评分）· 查询词高亮返回（<span class="mono">highlight</span>）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">2</div>
+      <div class="body"><strong>筛选：</strong>组合 <span class="mono">filter</span> 精确过滤 — 按作者（author_id）、时间范围（created_at range）、类型（media_type）、是否含视频（has_video）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">3</div>
+      <div class="body"><strong>排序：</strong>双模式 — <span class="mono">_score</span>（相关度，默认）· <span class="mono">created_at desc</span>（最新）· <span class="mono">like_count desc</span>（热门）；<span class="mono">function_score</span> 时间衰减混合排序（新帖加权）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">4</div>
+      <div class="body"><strong>分页：</strong>当前采用 <span class="mono">from/size</span> 分页，<strong>前端限制最大页码（如 100 页）</strong>，避免深页性能劣化 · 海量翻页场景可迭代升级为 <span class="mono">search_after</span> 游标分页（预留演进空间）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">5</div>
+      <div class="body"><strong>用户搜索：</strong>同样走 ES <span class="mono">users</span> 索引（username 前缀匹配），返回用户 + 帖子混合结果</div>
+    </div>
+  </div>
+</div>
+
+<div class="svc-layout">
+  <!-- 左列：内部三层 -->
+  <div class="svc-box">
+    <h3>内部三层架构</h3>
+    <div class="layer-stack">
+      <div class="layer handler">
+        <div class="layer-title">Handler 层 <span style="color:#4a9eff;font-size:0.65rem">(gRPC 入口)</span></div>
+        <div class="layer-body">
+          <span class="fn">SearchGrpc</span> — SearchPosts / SearchUsers / GetSearchSuggest<br>
+          <span style="color:#666">参数校验 + 协议转换，无业务逻辑</span>
+        </div>
+      </div>
+      <div class="layer service">
+        <div class="layer-title">Service 层 <span style="color:#4caf50;font-size:0.65rem">(业务核心)</span></div>
+        <div class="layer-body">
+          SearchService — 检索 DSL 组装 / 结果处理<br>
+          SyncService — ES 同步消费 + 幂等 + 重试<br>
+          CompensationService — 增量扫描 / dead-letter 补偿<br>
+          <span class="consumer">➤ 消费 post:created / post:deleted / post:updated</span>
+        </div>
+      </div>
+      <div class="layer repository">
+        <div class="layer-title">Repository 层 <span style="color:#ff8c42;font-size:0.65rem">(数据访问)</span></div>
+        <div class="layer-body">
+          go-elasticsearch — ES 读写<br>
+          GORM / sqlx — MySQL 增量扫描<br>
+          go-redis — 检索缓存<br>
+          <span style="color:#666">ES 是唯一检索数据源，MySQL 仅用于补偿扫描</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右列：外部依赖 -->
+  <div class="svc-box">
+    <h3>外部依赖</h3>
+    <div class="dep-item"><span class="conn">gRPC ⟷</span> Gateway — 搜索接口</div>
+    <div class="dep-item"><span class="conn async">Kafka ⟵</span> post:created / post:deleted / post:updated（同步事件）</div>
+    <div class="dep-item"><span class="conn">MySQL ⟷</span> feed_db（只读，增量补偿扫描）</div>
+    <div class="dep-item"><span class="conn">Redis ⟷</span> 检索结果缓存 / 热门词缓存</div>
+    <div class="dep-item"><span class="conn">ES ⟷</span> posts + users 索引（主检索源）</div>
+  </div>
+</div>
+
+<div class="svc-layout" style="grid-template-columns: 1fr 1fr">
+  <!-- ES 一致性 -->
+  <div class="svc-box">
+    <h3>ES 数据一致性 & 增量同步</h3>
+    <div class="ws-box">
+      <strong>最终一致</strong>（秒级延迟）：业务写 MySQL 是唯一权威，ES 异步同步<br>
+      <strong>幂等消费</strong>：biz_unique_id 去重，重复投递不重复写<br>
+      <strong>失败重试</strong>：ES 写入失败自动重试 3 次 → 仍失败进 <span style="font-family:monospace">dead_letter</span> 表，定时任务补偿重放<br>
+      <strong>死信运维</strong>：死信表数据支持<strong>后台人工重试</strong>（Web 管理界面一键重放），已处理记录<strong>定期清理</strong>（保留 7 天），避免死信表无限膨胀<br>
+      <strong>增量兜底</strong>：每 10min 扫 MySQL 增量（updated_at 游标），修复漏同步数据<br>
+      <strong>降级开关</strong>：ES 故障时检索自动降级为 MySQL FULLTEXT（posts.content LIKE）或直接返回热门缓存，保证搜索可用性
+    </div>
+  </div>
+
+  <!-- Redis 缓存策略 -->
+  <div class="svc-box">
+    <h3>Redis 缓存策略</h3>
+    <div class="redis-item">
+      <span class="rkey">search:result:{query}:{page}</span><span class="rtype">String</span><span class="rtype ttl">TTL 5min</span>
+      <div style="color:#888;margin-top:0.2rem">检索结果缓存（JSON 序列化）· 高频词命中缓存免查 ES · <strong>依靠 TTL 自动过期</strong>，帖子更新后存在短暂缓存不一致（可接受，搜索非强实时）</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">search:hot:{day}</span><span class="rtype">ZSet</span><span class="rtype ttl">TTL 24h</span>
+      <div style="color:#888;margin-top:0.2rem">热搜词榜 · 搜索次数计数 · 搜索框联想数据源</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">search:suggest:{prefix}</span><span class="rtype">String</span><span class="rtype ttl">TTL 10min</span>
+      <div style="color:#888;margin-top:0.2rem">搜索联想缓存 · 前缀命中直接返回 · 减少 ES suggest 调用</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">es:circuit:open</span><span class="rtype">String</span><span class="rtype ttl">TTL 30s</span>
+      <div style="color:#888;margin-top:0.2rem">ES 熔断标记 · 连续失败置位 · 触发期间走降级路径</div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#ff8c42;margin-top:0.5rem">
+  <p style="font-size:0.8rem;color:#ccc"><strong>降级策略（三级）：</strong></p>
+  <div class="ws-box">
+    <strong>L1 正常</strong>：Redis 检索缓存命中 → 免 ES 查询<br>
+    <strong>L2 ES 可用</strong>：走 ES 全文检索（BM25 + 筛选 + 排序）<br>
+    <strong>L3 ES 故障</strong>：熔断标记开启 → 降级 MySQL FULLTEXT 检索 或 返回热门帖子缓存列表 + 提示「搜索结果可能不完整」<br>
+    恢复：熔断 30s 后半开探测，ES 恢复自动回到 L2
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ ES 同步 & Search 模块是否符合预期？下一模块：K8s 部署拓扑（Kind）</span>
+</div>

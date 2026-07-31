@@ -1,0 +1,190 @@
+<h2>🔔 Notification Service + Kafka 事件拓扑</h2>
+<p class="subtitle">Node.js · Handler → Service → Repository · 统一事件消费 · 站内消息 · WebSocket 推送 · 已读/未读数</p>
+
+<style>
+  .svc-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .svc-box { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .svc-box h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.75rem; }
+  .layer-stack { display: flex; flex-direction: column; gap: 0.4rem; }
+  .layer { border: 1px solid #2a2a4a; border-radius: 6px; background: #16213e; }
+  .layer-title { padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; color: #fff; border-bottom: 1px solid #2a2a4a; border-radius: 6px 6px 0 0; }
+  .layer-body { padding: 0.5rem 0.75rem; font-size: 0.72rem; color: #999; }
+  .layer-body .fn { color: #4a9eff; font-family: monospace; }
+  .layer-body .producer { color: #4caf50; font-family: monospace; }
+  .layer-body .consumer { color: #ff8c42; font-family: monospace; }
+  .layer.handler .layer-title { background: #1a2a4a; }
+  .layer.service .layer-title { background: #1a3a2a; }
+  .layer.repository .layer-title { background: #3a2a1a; }
+  .dep-item { display: flex; align-items: center; gap: 0.5rem; background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.75rem; color: #ccc; }
+  .dep-item .conn { color: #4a9eff; font-family: monospace; font-size: 0.7rem; }
+  .dep-item .conn.async { color: #ff8c42; }
+  .table-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; }
+  .table-item .tname { font-family: monospace; font-size: 0.78rem; color: #fff; }
+  .table-item .tcols { font-size: 0.68rem; color: #888; margin-top: 0.25rem; }
+  .table-item .tag-pk { color: #4a9eff; } .table-item .tag-fk { color: #ff8c42; } .table-item .tag-idx { color: #4caf50; }
+  .redis-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.72rem; }
+  .redis-item .rkey { font-family: monospace; font-size: 0.75rem; color: #fff; }
+  .redis-item .rtype { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #1a3a2a; color: #4caf50; margin-left: 0.4rem; }
+  .redis-item .rtype.ttl { background: #3a2a1a; color: #ff8c42; }
+  .legend-mini { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.7rem; color: #888; margin: 0.5rem 0; }
+  .legend-mini span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -2px; }
+  .lg-grpc { background: #4a9eff; } .lg-kafka-p { background: #4caf50; } .lg-kafka-c { background: #ff8c42; }
+  .event-bus { background: #0d1b2a; border: 2px solid #6c63ff; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+  .ev-row { display: flex; gap: 0.75rem; margin: 0.4rem 0; align-items: flex-start; }
+  .ev-row .body { font-size: 0.75rem; color: #bbb; line-height: 1.5; flex: 1; }
+  .ev-row .body strong { color: #fff; }
+  .ev-topic { display: inline-block; font-family: monospace; font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 4px; margin-right: 0.4rem; }
+  .ev-topic.t1 { background: #1a3a2a; color: #4caf50; border: 1px solid #2a5a3a; }
+  .ev-topic.t2 { background: #1a3a6a; color: #4a9eff; border: 1px solid #2a4a7a; }
+  .ev-topic.t3 { background: #3a2a1a; color: #ff8c42; border: 1px solid #5a3a2a; }
+  .ev-flow { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.5rem 0; }
+  .ev-step { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: #aaa; }
+  .ev-step .num { background: #6c63ff; color: #fff; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 700; flex-shrink: 0; }
+  .ev-step .arrow { color: #ff8c42; }
+  .ws-box { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.6rem 0.75rem; margin: 0.4rem 0; font-size: 0.72rem; color: #999; line-height: 1.5; }
+  .ws-box strong { color: #fff; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.5rem">
+  <div class="node gateway" style="min-width:90px"><h4>🚪 Gateway</h4><p>WS 代理 / gRPC</p></div>
+  <span class="sync-arrow">⟷</span>
+  <div class="node highlight" style="min-width:110px"><h4>🔔 Notification</h4><p>Node.js</p></div>
+  <span class="async-arrow">─ ─ ⟵</span>
+  <div class="node async" style="min-width:90px"><h4>📨 Kafka</h4><p>全量事件</p></div>
+</div>
+
+<div class="legend-mini">
+  <span><span class="lg-grpc"></span>对外 gRPC 接口</span>
+  <span><span class="lg-kafka-p"></span>生产 Kafka 事件</span>
+  <span><span class="lg-kafka-c"></span>消费 Kafka 事件</span>
+</div>
+
+<!-- ⭐ 统一事件消费模型 -->
+<div class="svc-box" style="border:2px solid #6c63ff;grid-column:1/-1">
+  <h3>⭐ 统一事件消费模型（全事件汇总）</h3>
+  <div class="ev-row">
+    <div class="body">
+      <span class="ev-topic t2">👤 来自 User Service</span> <strong>user:follow-changed</strong> — 有人关注了你<br>
+      <span class="ev-topic t1">📰 来自 Feed Service</span> <strong>post:created</strong> — 你关注的人发帖<br>
+      <span class="ev-topic t1">📰 来自 Feed Service</span> <strong>post:liked</strong> — 有人赞了你的帖子<br>
+      <span class="ev-topic t3">🎬 来自 Video Service</span> <strong>video:transcoded</strong> — 你的视频转码完成<br>
+      <span class="ev-topic t1">📰 来自 Feed Service</span> <strong>post:commented</strong> — 有人评论了你的帖子
+    </div>
+  </div>
+  <div class="ev-flow">
+    <div class="ev-step"><div class="num">1</div><div>所有业务事件统一进入 Kafka（单一事件源，业务服务只发事件不做推送）</div></div>
+    <div class="ev-step"><div class="num">2</div><div>Notification Service 作为 <strong>统一消费者</strong>，订阅全部相关 Topic（consumer group: notification-group）</div></div>
+    <div class="ev-step"><div class="num">3</div><div>事件路由规则：按事件类型 + 目标用户组装站内消息 → 写 MySQL → 更新 Redis 未读数 → 实时推送</div></div>
+    <div class="ev-step"><div class="num">4</div><div>消费幂等：依托 <strong>biz_unique_id</strong>（事件唯一标识）实现消息去重，<strong>先查询数据库是否已存在该消息</strong>（DB 唯一索引 + Redis SETNX 双保险），避免 Kafka 重复消费生成重复通知</div></div>
+    <div class="ev-step"><div class="num">5</div><div>流量管控：Kafka 消费支持<strong>限速（rate limit）+ 批量写入</strong>（攒批落库），应对大 V 发帖/热点事件产生的消息洪峰，保护下游 MySQL</div></div>
+  </div>
+</div>
+
+<!-- WebSocket 转发链路 -->
+<div class="svc-box" style="border:2px solid #4a9eff;grid-column:1/-1">
+  <h3>⭐ WebSocket 网关转发链路</h3>
+  <div class="ev-flow">
+    <div class="ev-step"><div class="num">1</div><div><strong>连接建立：</strong>前端 <span style="font-family:monospace">GET /ws/notifications</span> → Gateway 完整走鉴权层（JWT + 黑名单）→ 升级 WS → Gateway 代理转发到 Notification Service</div></div>
+    <div class="ev-step"><div class="num">2</div><div><strong>连接管理：</strong>Notification Service 维护 <span style="font-family:monospace">conn:{user_id} → ws</span> 内存映射（+ Redis 记录在线状态，支持多端/多副本）</div></div>
+    <div class="ev-step"><div class="num">3</div><div><strong>消息推送：</strong>站内消息落库后 → 查连接映射 → 有连接：WS 实时推送；无连接：仅落库 + 未读数 +1（下次上线拉取）</div></div>
+    <div class="ev-step"><div class="num">4</div><div><strong>心跳保活：</strong>WS Ping/Pong 30s 间隔，断线自动重连；多实例部署时用 Redis Pub/Sub 广播到对应实例的连接</div></div>
+  </div>
+</div>
+
+<div class="svc-layout">
+  <!-- 左列：内部三层 -->
+  <div class="svc-box">
+    <h3>内部三层架构</h3>
+    <div class="layer-stack">
+      <div class="layer handler">
+        <div class="layer-title">Handler 层 <span style="color:#4a9eff;font-size:0.65rem">(gRPC / WS 入口)</span></div>
+        <div class="layer-body">
+          <span class="fn">NotificationGrpc</span> — GetNotifications / MarkRead / MarkAllRead / GetUnreadCount<br>
+          <span class="fn">WS Handler</span> — 连接升级、消息收发<br>
+          <span style="color:#666">协议解析 + 连接管理，无业务逻辑</span>
+        </div>
+      </div>
+      <div class="layer service">
+        <div class="layer-title">Service 层 <span style="color:#4caf50;font-size:0.65rem">(业务核心)</span></div>
+        <div class="layer-body">
+          KafkaConsumer — 统一事件消费 + 去重<br>
+          MessageService — 站内消息组装 / 已读处理<br>
+          PushService — WS 实时推送 / Redis Pub-Sub 广播<br>
+          <span class="consumer">➤ 消费 user:follow-changed / post:created / post:liked / post:commented / video:transcoded</span>
+        </div>
+      </div>
+      <div class="layer repository">
+        <div class="layer-title">Repository 层 <span style="color:#ff8c42;font-size:0.65rem">(数据访问)</span></div>
+        <div class="layer-body">
+          Prisma / Sequelize — MySQL 操作<br>
+          ioredis — 未读数、连接状态、去重<br>
+          <span style="color:#666">事务边界：消息落库 + 未读数更新</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右列：外部依赖 -->
+  <div class="svc-box">
+    <h3>外部依赖</h3>
+    <div class="dep-item"><span class="conn">gRPC ⟷</span> Gateway — 查询/已读接口</div>
+    <div class="dep-item"><span class="conn">WS ⟷</span> Gateway — WebSocket 代理转发链路</div>
+    <div class="dep-item"><span class="conn async">Kafka ⟵</span> user:follow-changed / post:liked 等全量事件</div>
+    <div class="dep-item"><span class="conn">MySQL ⟷</span> notify_db（独立库）</div>
+    <div class="dep-item"><span class="conn">Redis ⟷</span> 未读数 / 在线状态 / 消费去重 / Pub-Sub</div>
+  </div>
+</div>
+
+<div class="svc-layout" style="grid-template-columns: 1fr 1fr">
+  <!-- 数据库表 -->
+  <div class="svc-box">
+    <h3>数据库表 (notify_db)</h3>
+    <div class="table-item">
+      <span class="tname">notifications</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · user_id <span class="tag-idx">IDX</span> · type · actor_id · ref_id · content · is_read <span class="tag-idx">IDX</span> · biz_unique_id <span class="tag-idx">UNIQUE</span> · created_at <span class="tag-idx">IDX</span></div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">type: follow / like / comment / post / video_ready · ref_id 指向业务对象 · biz_unique_id 唯一索引支撑消费幂等</div>
+      <div style="font-size:0.65rem;color:#ff8c42;margin-top:0.25rem">🔄 生命周期：可配置消息保存周期（默认 30 天），定时归档清理历史消息，控制数据库容量</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">kafka_offsets</span>
+      <div class="tcols"><span class="tag-pk">topic + partition PK</span> · offset · updated_at</div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">📌 手动提交 offset 记录 · 配合 Redis 去重实现 exactly-once 效果</div>
+    </div>
+  </div>
+
+  <!-- Redis 缓存策略 -->
+  <div class="svc-box">
+    <h3>Redis 缓存策略</h3>
+    <div class="redis-item">
+      <span class="rkey">notify:unread:{user_id}</span><span class="rtype">String</span><span class="rtype ttl">TTL 7d 续期</span>
+      <div style="color:#888;margin-top:0.2rem">未读数 · 新消息 +1 · 已读清零/减量 · 首页角标读取 O(1) · <strong>支持 MySQL 兜底重建</strong>（缓存失效时按 is_read=0 计数回填，防数据不一致）</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">notify:dedup:{event_id}</span><span class="rtype">SETNX</span><span class="rtype ttl">TTL 24h</span>
+      <div style="color:#888;margin-top:0.2rem">消费幂等去重 · Kafka 重复投递只处理一次</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">ws:online:{user_id}</span><span class="rtype">String</span><span class="rtype ttl">TTL 心跳间隔×3</span>
+      <div style="color:#888;margin-top:0.2rem">在线状态 · 多端连接计数 · 心跳续期</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">notify:recent:{user_id}</span><span class="rtype">List</span><span class="rtype ttl">TTL 1h</span>
+      <div style="color:#888;margin-top:0.2rem">最近 N 条消息缓存（下拉刷新免查库）· 上限 50 条 LPUSH + LTRIM</div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#4caf50;border-style:solid;margin-top:0.5rem">
+  <p style="font-size:0.8rem;color:#ccc"><strong>推送模型总结：</strong></p>
+  <div class="ws-box">
+    <strong>在线</strong>（WS 已连接）→ 落库 + Redis 未读数 +1 + WS 实时推送<br>
+    <strong>离线断线保障</strong> → 离线期间消息<strong>持久入库</strong>，重连后客户端<strong>主动拉取全部离线通知</strong>，不丢消息<br>
+    <strong>多端</strong>（Web/移动端同时在线）→ Redis Pub/Sub 广播到连接所在实例，各端同时收到<br>
+    <strong>多端已读同步</strong> → 任意设备标记已读，<strong>同步更新数据库 is_read + 扣减 Redis 未读数</strong>，所有登录终端状态统一<br>
+    <strong>已读回执</strong> → MarkRead 更新 MySQL is_read + 扣减 Redis 未读数
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ Notification + Kafka 事件拓扑是否符合预期？下一模块：ES Sync + Search 查询设计</span>
+</div>

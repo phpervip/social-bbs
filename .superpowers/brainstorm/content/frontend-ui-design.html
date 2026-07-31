@@ -1,0 +1,113 @@
+<h2>🎨 前端 UI 设计（极简 B 风格）</h2>
+<p class="subtitle">极简主义 · Logo "B" · Shell + 3 Remotes · 页面路由 · 设计令牌</p>
+
+<style>
+  .ui-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .ui-box { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .ui-box h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.75rem; }
+  .logo-preview { display: flex; align-items: center; gap: 1rem; background: #16213e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem 1.25rem; }
+  .logo-b { width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(135deg, #c19a6b, #8b5a2b); display: flex; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: 800; color: #fff; font-family: 'Inter', sans-serif; }
+  .logo-word { font-size: 1.4rem; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+  .tokens { display: flex; flex-direction: column; gap: 0.4rem; }
+  .token-row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.72rem; color: #bbb; }
+  .token-swatch { width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.15); }
+  .token-row .tname { font-family: monospace; color: #c19a6b; min-width: 70px; }
+  .route-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.35rem 0; font-size: 0.72rem; color: #ccc; display: flex; justify-content: space-between; align-items: center; }
+  .route-item .path { font-family: monospace; color: #fff; }
+  .route-item .owner { font-size: 0.62rem; color: #888; }
+  .route-item .owner.remote { color: #ff8c42; }
+  .route-item .owner.shell { color: #c19a6b; }
+  .ui-spec { font-size: 0.75rem; color: #bbb; line-height: 1.7; }
+  .ui-spec b { color: #fff; }
+  .ui-spec .mono { font-family: monospace; color: #c19a6b; }
+  .principle { background: #16213e; border-left: 3px solid #c19a6b; border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.75rem; color: #ccc; line-height: 1.5; }
+  .principle b { color: #fff; }
+</style>
+
+<!-- ⭐ Logo & 设计原则 -->
+<div class="svc-box" style="border:2px solid #8b5a2b;grid-column:1/-1">
+  <h3>⭐ Logo & 设计原则</h3>
+  <div class="logo-preview">
+    <div class="logo-b">B</div>
+    <div class="logo-word">B</div>
+    <span style="color:#888;font-size:0.75rem">纯 CSS 实现 · 咖啡棕渐变圆角方块 + 粗体字母</span>
+  </div>
+  <div style="margin-top:0.75rem">
+    <div class="principle"><b>少即是多</b>：核心信息优先，无装饰元素；卡片无边框，用间距与留白分隔内容</div>
+    <div class="principle"><b>黑白 + 咖啡棕</b>：页面以深色/浅色中性色为主，咖啡棕（#8B5A2B）仅用于 Logo、链接、主按钮、选中态 — 避开 X.com 蓝/黑白雷同</div>
+    <div class="principle"><b>克制动效</b>：仅 hover 颜色过渡（150ms）、骨架屏加载（skeleton）、下拉刷新；无弹跳/缩放花哨动画</div>
+    <div class="principle"><b>中文优先</b>：字体栈 <span class="mono">system-ui, -apple-system, "PingFang SC", "Microsoft YaHei"</span>，字号 14px 基准，行高 1.5</div>
+  </div>
+</div>
+
+<div class="ui-layout">
+  <!-- 左：设计令牌 -->
+  <div class="ui-box">
+    <h3>设计令牌（Design Tokens）</h3>
+    <div class="tokens">
+      <div class="token-row"><span class="token-swatch" style="background:#0f1419"></span><span class="tname">bg-dark</span> #0f1419 深色背景（暗色模式）</div>
+      <div class="token-row"><span class="token-swatch" style="background:#ffffff;border-color:#333"></span><span class="tname">bg-light</span> #ffffff 浅色背景（亮色模式）</div>
+      <div class="token-row"><span class="token-swatch" style="background:#8b5a2b"></span><span class="tname">brand</span> #8B5A2B 咖啡棕（品牌主色）</div>
+      <div class="token-row"><span class="token-swatch" style="background:#c19a6b"></span><span class="tname">brand-2</span> #C19A6B 焦糖亮色（渐变副色）</div>
+      <div class="token-row"><span class="token-swatch" style="background:#536471"></span><span class="tname">text-2</span> #536471 次要文字</div>
+      <div class="token-row"><span class="token-swatch" style="background:#ff4d4f"></span><span class="tname">danger</span> #ff4d4f 错误/删除</div>
+      <div class="token-row"><span class="token-swatch" style="background:#4caf50"></span><span class="tname">success</span> #4caf50 成功</div>
+      <div class="token-row"><span class="token-swatch" style="background:#8b5a2b"></span><span class="tname">accent</span> 视频角标/收藏 — 复用品牌咖啡棕，全局仅一色</div>
+    </div>
+  </div>
+
+  <!-- 右：路由表 -->
+  <div class="ui-box">
+    <h3>前端路由（Shell 统一注册）</h3>
+    <div class="route-item"><span class="path">/login · /register</span><span class="owner shell">Shell（独立页，无布局）</span></div>
+    <div class="route-item"><span class="path">/home</span><span class="owner remote">Feed Remote · 首页时间线</span></div>
+    <div class="route-item"><span class="path">/explore</span><span class="owner remote">Feed Remote · 探索/搜索</span></div>
+    <div class="route-item"><span class="path">/post/:id</span><span class="owner remote">Feed Remote · 帖子详情</span></div>
+    <div class="route-item"><span class="path">/post/create</span><span class="owner remote">Feed Remote · 发帖（Modal 内嵌）</span></div>
+    <div class="route-item"><span class="path">/user/:id</span><span class="owner remote">User Remote · 个人主页</span></div>
+    <div class="route-item"><span class="path">/settings</span><span class="owner remote">User Remote · 设置</span></div>
+    <div class="route-item"><span class="path">/video/:id</span><span class="owner remote">Video Remote · 视频播放页</span></div>
+    <div class="route-item"><span class="path">/notifications</span><span class="owner remote">Shell · 通知抽屉（WS 实时）</span></div>
+  </div>
+</div>
+
+<!-- ⭐ 关键页面 -->
+<div class="svc-box" style="border:2px solid #8b5a2b;grid-column:1/-1">
+  <h3>⭐ 关键页面布局</h3>
+  <div class="ui-spec">
+    <b>布局骨架</b>：三栏（桌面）— 左栏导航（固定 260px）+ 中栏内容流（弹性）+ 右栏推荐（固定 320px，≤1024px 隐藏）；移动端单栏，导航收为底部 TabBar（首页/探索/通知/我的）<br><br>
+    <b>首页时间线</b>：帖子卡片纵向流 — 头像 + 用户名 + 时间 + 内容 + 媒体（图/视频封面）+ 操作行（点赞/评论/转发，数字轻量展示）；下拉刷新 + 滚动加载（游标分页）<br><br>
+    <b>发帖</b>：Modal 弹出 — 文本区 + 图片/视频上传（分片直传 S3 预签名）+ 发布按钮（咖啡棕实底）；280 字计数，超限禁用<br><br>
+    <b>视频页</b>：16:9 播放器（HLS.js）+ 标题/作者/点赞评论 + 相关推荐列表；封面懒加载 + 播放时自动暂停其他<br><br>
+    <b>个人主页</b>：封面渐变条 + 头像/昵称/简介 + 关注/粉丝/帖子统计 + Tab（帖子/视频/喜欢）<br><br>
+    <b>通知</b>：右侧抽屉 — 分组（提及/点赞/评论/关注/系统），WS 实时推送红点徽标，未读高亮 + 已读标记
+  </div>
+</div>
+
+<div class="ui-layout">
+  <!-- 左：组件规范 -->
+  <div class="ui-box">
+    <h3>组件规范</h3>
+    <div class="ui-spec">
+      <b>共享组件（Shell 提供）</b>：<span class="mono">Avatar / Button / Skeleton / Modal / Toast / EmptyState</span> — Remotes 通过 MF 复用，禁止各自重写<br><br>
+      <b>状态</b>：loading → 骨架屏；empty → 空状态插画 + 引导文案；error → 轻量错误提示 + 重试按钮<br><br>
+      <b>交互反馈</b>：点赞/关注/转发即时乐观更新（UI 先行，失败回滚 + Toast）<br><br>
+      <b>暗色模式</b>：CSS 变量切换（<span class="mono">[data-theme="dark"]</span>），跟随系统 + 手动切换
+    </div>
+  </div>
+
+  <!-- 右：性能 & 规范 -->
+  <div class="ui-box">
+    <h3>性能 & 工程规范</h3>
+    <div class="ui-spec">
+      <b>代码分割</b>：MF Remote 按需加载（<span class="mono">import()</span>），首屏仅 Shell + 当前 Remote<br><br>
+      <b>图片</b>：CDN 缩略图参数（<span class="mono">?w=480&q=75</span>）· loading="lazy" · 头像统一 48px 裁切<br><br>
+      <b>缓存</b>：静态资源 <span class="mono">Cache-Control: immutable</span>（内容哈希文件名）· API 响应 5min 缓存（GET）<br><br>
+      <b>错误边界</b>：每个 Remote 外层 ErrorBoundary，子应用崩溃仅显示局部占位，不影响 Shell 与其他 Remote
+    </div>
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ 前端 UI 设计是否符合预期？下一模块：实现计划（A/B 计划对比）</span>
+</div>

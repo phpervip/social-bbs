@@ -1,0 +1,127 @@
+<h2>🏗️ 总体架构 — 简化版 X.com</h2>
+<p class="subtitle">方案 A：真·微服务 · 七层架构拓扑（← 从左到右流量方向）</p>
+
+<div class="section">
+  <div class="label">流量入口</div>
+  <div class="flex-row">
+    <div class="diagram-box">
+      <h4>🌐 Browser</h4>
+      <p>React SPA</p>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box">
+      <h4>⚡ Imperva CDN</h4>
+      <p>静态资源加速</p>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box">
+      <h4>🔄 Nginx</h4>
+      <p>反向代理 / SSL</p>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box highlight">
+      <h4>🚪 API Gateway</h4>
+      <p>Node.js (Fastify)</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">微服务层 (K8s Deployments)</div>
+  <div class="flex-wrap">
+    <div class="diagram-box" style="flex:1;min-width:180px">
+      <h4>👤 User Service</h4>
+      <p>Java + Spring Boot</p>
+      <p style="font-size:0.7rem;color:#666">注册/登录/关注/个人资料</p>
+    </div>
+    <div class="diagram-box" style="flex:1;min-width:180px">
+      <h4>📰 Feed Service</h4>
+      <p>Go</p>
+      <p style="font-size:0.7rem;color:#666">帖子 CRUD / 时间线 / 点赞</p>
+    </div>
+    <div class="diagram-box" style="flex:1;min-width:180px">
+      <h4>🎬 Video Service</h4>
+      <p>Go</p>
+      <p style="font-size:0.7rem;color:#666">上传 / HLS 切片 / 播放</p>
+    </div>
+    <div class="diagram-box" style="flex:1;min-width:180px">
+      <h4>🔔 Notification</h4>
+      <p>Node.js Consumer</p>
+      <p style="font-size:0.7rem;color:#666">WebSocket 推送</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">服务间通信</div>
+  <div class="flex-row">
+    <div class="diagram-box" style="flex:1">
+      <h4>📡 同步: gRPC</h4>
+      <p>Gateway → Services</p>
+      <p style="font-size:0.7rem;color:#666">protobuf 序列化</p>
+    </div>
+    <span class="arrow-right" style="font-size:0.8rem">↔</span>
+    <div class="diagram-box" style="flex:1">
+      <h4>📨 异步: Kafka</h4>
+      <p>Feed → Notification / Analytics</p>
+      <p style="font-size:0.7rem;color:#666">事件驱动解耦</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">数据层（各服务独立）</div>
+  <div class="flex-wrap">
+    <div class="diagram-box"><h4>🗄️ MySQL × 3</h4><p>User / Feed / Video<br>每个服务独立实例</p></div>
+    <div class="diagram-box"><h4>⚡ Redis</h4><p>Session / Timeline 缓存<br>热点数据加速</p></div>
+    <div class="diagram-box"><h4>🔍 Elasticsearch</h4><p>全文搜索（无推荐）<br>帖子 + 用户搜索</p></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">存储 & 媒体</div>
+  <div class="flex-row">
+    <div class="diagram-box" style="flex:1"><h4>☁️ S3</h4><p>图片 + 视频原文件</p></div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box" style="flex:1"><h4>🎞️ HLS + CDN</h4><p>视频流分发</p></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">前端架构 (Module Federation)</div>
+  <div class="flex-wrap">
+    <div class="diagram-box highlight">
+      <h4>🏠 Shell (Host)</h4>
+      <p>布局 / 导航 / 路由 / Logo B</p>
+      <p style="font-size:0.7rem;color:#666">Webpack 5 Host</p>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box">
+      <h4>📦 User Remote</h4>
+      <p>注册 / 登录 / 个人主页</p>
+    </div>
+    <div class="diagram-box">
+      <h4>📦 Feed Remote</h4>
+      <p>时间线 / 帖子 / 交互</p>
+    </div>
+    <div class="diagram-box">
+      <h4>📦 Video Remote</h4>
+      <p>视频上传 / HLS 播放器</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">部署 (Kind K8s)</div>
+  <div class="flex-row">
+    <div class="diagram-box"><h4>📦 Kind Cluster</h4><p>K8s in Docker</p></div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box"><h4>📋 Ingress-NGINX</h4><p>集群入口</p></div>
+    <span class="arrow-right">→</span>
+    <div class="diagram-box"><h4>🔗 Service Mesh</h4><p>服务发现 / 负载均衡</p></div>
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:2rem">
+  <span>这符合你的预期吗？接下来逐个模块深入设计 ⬇️</span>
+</div>

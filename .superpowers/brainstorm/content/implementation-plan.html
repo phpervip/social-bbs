@@ -1,0 +1,78 @@
+<h2>📐 实现计划（A/B 计划对比）</h2>
+<p class="subtitle">横向全量 vs 纵向切片 · 两条路线 · 一次选择</p>
+
+<style>
+  .plan-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .plan-box { background: #0d1b2a; border: 2px solid #2a2a4a; border-radius: 10px; padding: 1rem; position: relative; }
+  .plan-box.plan-a { border-color: #8b5a2b; }
+  .plan-box.plan-b { border-color: #c19a6b; }
+  .plan-box h3 { font-size: 0.95rem; color: #fff; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+  .plan-tag { font-size: 0.6rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; }
+  .plan-a .plan-tag { background: #8b5a2b; color: #fff; }
+  .plan-b .plan-tag { background: #c19a6b; color: #1a1a1a; }
+  .plan-desc { font-size: 0.75rem; color: #bbb; line-height: 1.6; margin-bottom: 0.75rem; }
+  .plan-phase { background: #16213e; border-radius: 6px; padding: 0.55rem 0.75rem; margin: 0.45rem 0; font-size: 0.72rem; color: #ccc; line-height: 1.55; }
+  .plan-phase b { color: #fff; }
+  .plan-phase .ph { display: inline-block; background: #2a2a4a; color: #fff; font-size: 0.6rem; border-radius: 999px; padding: 0.1rem 0.5rem; margin-right: 0.4rem; font-weight: 700; }
+  .plan-phase .ph.a { background: #8b5a2b; }
+  .plan-phase .ph.b { background: #c19a6b; color: #1a1a1a; }
+  .compare-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; margin: 0.5rem 0; }
+  .compare-table th { background: #16213e; color: #fff; padding: 0.5rem 0.75rem; text-align: left; font-weight: 600; border-bottom: 1px solid #2a2a4a; }
+  .compare-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #1a2a3a; color: #bbb; vertical-align: top; }
+  .compare-table td:first-child { color: #888; white-space: nowrap; }
+  .recommend { background: #16213e; border: 2px solid #4caf50; border-radius: 10px; padding: 1rem; margin-top: 0.75rem; }
+  .recommend h3 { font-size: 0.9rem; color: #4caf50; margin-bottom: 0.5rem; }
+  .rec-row { font-size: 0.75rem; color: #ccc; line-height: 1.7; }
+  .rec-row b { color: #fff; }
+  .rec-row .k { font-family: monospace; color: #c19a6b; }
+</style>
+
+<div class="plan-layout">
+  <!-- 计划 A -->
+  <div class="plan-box plan-a">
+    <h3>计划 A：横向全量 <span class="plan-tag">一步到位</span></h3>
+    <div class="plan-desc">一次性搭建全部 6 个微服务 + 全部中间件 + 前端 3 个 Remote，最后统一联调。</div>
+    <div class="plan-phase"><span class="ph a">P1</span><b>基础设施</b>：Kind 集群 + MySQL/Redis/Kafka/ES/MinIO + Ingress 全部就位</div>
+    <div class="plan-phase"><span class="ph a">P2</span><b>后端并行</b>：6 个服务同时开写（gRPC + 表结构 + 核心逻辑）</div>
+    <div class="plan-phase"><span class="ph a">P3</span><b>前端并行</b>：Shell + 3 Remote + 全部页面</div>
+    <div class="plan-phase"><span class="ph a">P4</span><b>联调收尾</b>：统一联调 → 修 bug → 演示</div>
+  </div>
+
+  <!-- 计划 B -->
+  <div class="plan-box plan-b">
+    <h3>计划 B：纵向切片 <span class="plan-tag">最小闭环先行</span></h3>
+    <div class="plan-desc">先打通一条最小完整链路（发帖 → 时间线），跑通后再逐模块横向扩展。</div>
+    <div class="plan-phase"><span class="ph b">P1</span><b>最小闭环</b>：Shell + Feed Remote + Gateway + Feed Service + MySQL/Redis → 「发帖 → 首页时间线」端到端跑通</div>
+    <div class="plan-phase"><span class="ph b">P2</span><b>用户域</b>：User Service + 注册/登录/关注 + JWT 鉴权接入</div>
+    <div class="plan-phase"><span class="ph b">P3</span><b>视频域</b>：Video Service + S3 分片 + FFmpeg 转码 + HLS 播放</div>
+    <div class="plan-phase"><span class="ph b">P4</span><b>增强域</b>：Kafka 事件化 + Notification + ES Search + 通知抽屉</div>
+  </div>
+</div>
+
+<!-- 对比表 -->
+<div class="svc-box" style="border:2px solid #2a2a4a">
+  <h3>⭐ 对比</h3>
+  <table class="compare-table">
+    <tr><th></th><th>计划 A：横向全量</th><th>计划 B：纵向切片</th></tr>
+    <tr><td>首个可见成果</td><td>慢（全部完成后才有）</td><td>快（P1 即可演示发帖/时间线）</td></tr>
+    <tr><td>风险</td><td>集成风暴 — 问题集中在最后爆发，难定位</td><td>增量集成 — 每步小风险，即时消化</td></tr>
+    <tr><td>改动成本</td><td>低（一次设计一次写）</td><td>中（P2 后需回填 Kafka 事件化改造 Feed）</td></tr>
+    <tr><td>学习价值</td><td>高（全面覆盖所有技术点）</td><td>高（每步都有完整可运行成果）</td></tr>
+    <tr><td>中途可控性</td><td>低（中途无法演示/验收）</td><td>高（每个阶段都能演示、可随时停下）</td></tr>
+    <tr><td>总工期</td><td>理论最短（并行最大化）</td><td>略长（有回填成本）</td></tr>
+  </table>
+</div>
+
+<!-- 推荐 -->
+<div class="recommend">
+  <h3>✅ 推荐：计划 B（纵向切片）</h3>
+  <div class="rec-row">
+    <b>理由</b>：本项目的目标是<b>学习/演示</b> — 纵向切片让每个阶段都有可运行、可演示的成果，学习曲线平缓；集成风险分散，出问题好定位。<br>
+    <b>关键点</b>：P2 回填 Kafka 事件化时，Feed 的发帖逻辑需改为 outbox 模式 — 设计已预留（outbox_events 表 + Worker），回填成本可控。<br>
+    <b>里程碑</b>：P1「发帖 → 时间线」→ P2「账号/关注」→ P3「视频」→ P4「通知 + 搜索」— 每阶段结束都有一次完整演示。
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ 选择 A 或 B？确认后进入最终方案审批（HARD-GATE），批准即停止设计、开始实现</span>
+</div>

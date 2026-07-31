@@ -1,0 +1,228 @@
+<h2>📰 Feed Service 详细设计</h2>
+<p class="subtitle">Go · Handler → Service → Repository · Timeline 信息流架构（评审重点）· Kafka · MySQL · ES 同步</p>
+
+<style>
+  .svc-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .svc-box { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .svc-box h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.75rem; }
+  .layer-stack { display: flex; flex-direction: column; gap: 0.4rem; }
+  .layer { border: 1px solid #2a2a4a; border-radius: 6px; background: #16213e; }
+  .layer-title { padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; color: #fff; border-bottom: 1px solid #2a2a4a; border-radius: 6px 6px 0 0; }
+  .layer-body { padding: 0.5rem 0.75rem; font-size: 0.72rem; color: #999; }
+  .layer-body .fn { color: #4a9eff; font-family: monospace; }
+  .layer-body .producer { color: #4caf50; font-family: monospace; }
+  .layer-body .consumer { color: #ff8c42; font-family: monospace; }
+  .layer.handler .layer-title { background: #1a2a4a; }
+  .layer.service .layer-title { background: #1a3a2a; }
+  .layer.repository .layer-title { background: #3a2a1a; }
+  .dep-item { display: flex; align-items: center; gap: 0.5rem; background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.75rem; color: #ccc; }
+  .dep-item .conn { color: #4a9eff; font-family: monospace; font-size: 0.7rem; }
+  .dep-item .conn.async { color: #ff8c42; }
+  .table-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; }
+  .table-item .tname { font-family: monospace; font-size: 0.78rem; color: #fff; }
+  .table-item .tcols { font-size: 0.68rem; color: #888; margin-top: 0.25rem; }
+  .table-item .tag-pk { color: #4a9eff; } .table-item .tag-fk { color: #ff8c42; } .table-item .tag-idx { color: #4caf50; }
+  .redis-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.72rem; }
+  .redis-item .rkey { font-family: monospace; font-size: 0.75rem; color: #fff; }
+  .redis-item .rtype { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #1a3a2a; color: #4caf50; margin-left: 0.4rem; }
+  .redis-item .rtype.ttl { background: #3a2a1a; color: #ff8c42; }
+  .legend-mini { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.7rem; color: #888; margin: 0.5rem 0; }
+  .legend-mini span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -2px; }
+  .lg-grpc { background: #4a9eff; } .lg-kafka-p { background: #4caf50; } .lg-kafka-c { background: #ff8c42; }
+  .timeline-flow { background: #0d1b2a; border: 2px solid #6c63ff; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+  .tl-step { display: flex; gap: 0.75rem; margin: 0.5rem 0; align-items: flex-start; }
+  .tl-step .num { background: #6c63ff; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem; }
+  .tl-step .body { font-size: 0.75rem; color: #bbb; line-height: 1.5; }
+  .tl-step .body strong { color: #fff; }
+  .tl-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 0.5rem 0; }
+  .tl-mode-card { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.6rem 0.75rem; }
+  .tl-mode-card.push { border-color: #4caf50; }
+  .tl-mode-card.pull { border-color: #4a9eff; }
+  .tl-mode-card h4 { font-size: 0.78rem; color: #fff; margin-bottom: 0.2rem; }
+  .tl-mode-card p { font-size: 0.7rem; color: #999; line-height: 1.4; }
+  .tl-mode-card .badge { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; margin-bottom: 0.3rem; }
+  .badge.push { background: #1a3a2a; color: #4caf50; }
+  .badge.pull { background: #1a3a6a; color: #4a9eff; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.5rem">
+  <div class="node gateway" style="min-width:90px"><h4>🚪 Gateway</h4><p>gRPC 调用</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node highlight" style="min-width:110px"><h4>📰 Feed Service</h4><p>Go</p></div>
+  <span class="async-arrow">─ ─ →</span>
+  <div class="node async" style="min-width:90px"><h4>📨 Kafka</h4><p>事件</p></div>
+</div>
+
+<div class="legend-mini">
+  <span><span class="lg-grpc"></span>对外 gRPC 接口</span>
+  <span><span class="lg-kafka-p"></span>生产 Kafka 事件</span>
+  <span><span class="lg-kafka-c"></span>消费 Kafka 事件</span>
+</div>
+
+<div class="svc-layout">
+  <!-- 左列：内部三层 -->
+  <div class="svc-box">
+    <h3>内部三层架构</h3>
+    <div class="layer-stack">
+      <div class="layer handler">
+        <div class="layer-title">Handler 层 <span style="color:#4a9eff;font-size:0.65rem">(gRPC 入口)</span></div>
+        <div class="layer-body">
+          <span class="fn">FeedServiceGrpc</span> — CreatePost / GetPost / GetHomeTimeline / LikePost / UnlikePost / AddComment / GetComments / DeletePost / Search<br>
+          <span style="color:#666">参数校验 + 协议转换，无业务逻辑</span>
+        </div>
+      </div>
+      <div class="layer service">
+        <div class="layer-title">Service 层 <span style="color:#4caf50;font-size:0.65rem">(业务核心)</span></div>
+        <div class="layer-body">
+          PostService — 发帖（写 MySQL + 发 Kafka）<br>
+          TimelineService — 信息流读写（重点 ↓）<br>
+          InteractionService — 点赞 / 评论<br>
+          <span class="producer">➤ 生产 post:created</span><br>
+          <span class="producer">➤ 生产 post:liked</span><br>
+          <span class="consumer">➤ 消费 user:follow-changed（来自 User Service）</span><br>
+          <span class="consumer">➤ 消费 user:registered（初始化空时间线）</span>
+        </div>
+      </div>
+      <div class="layer repository">
+        <div class="layer-title">Repository 层 <span style="color:#ff8c42;font-size:0.65rem">(数据访问)</span></div>
+        <div class="layer-body">
+          GORM / sqlx — MySQL 操作<br>
+          go-redis — Timeline ZSet、帖子缓存<br>
+          <span style="color:#666">事务边界：发帖/点赞在本地事务内完成 MySQL 写入</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右列：外部依赖 -->
+  <div class="svc-box">
+    <h3>外部依赖</h3>
+    <div class="dep-item"><span class="conn">gRPC ⟷</span> Gateway — 接收 HTTP→gRPC 转发的帖子/时间线请求</div>
+    <div class="dep-item"><span class="conn">gRPC ⟷</span> User Service — 校验用户存在 / 查询关注关系</div>
+    <div class="dep-item"><span class="conn async">Kafka ➤</span> post:created（新帖子发布）</div>
+    <div class="dep-item"><span class="conn async">Kafka ➤</span> post:liked（点赞事件）</div>
+    <div class="dep-item"><span class="conn async">Kafka ⟵</span> user:follow-changed（关注变更）</div>
+    <div class="dep-item"><span class="conn async">Kafka ⟵</span> user:registered（新用户注册）</div>
+    <div class="dep-item"><span class="conn">MySQL ⟷</span> feed_db（独立库）</div>
+    <div class="dep-item"><span class="conn">Redis ⟷</span> Timeline ZSet / 帖子缓存</div>
+    <div class="dep-item"><span class="conn">ES ⟷</span> 全文检索（经 Kafka 同步）</div>
+  </div>
+</div>
+
+<!-- ⭐ Timeline 信息流架构（评审重点） -->
+<div class="svc-box" style="border:2px solid #6c63ff;grid-column:1/-1">
+  <h3>⭐ Timeline 信息流架构（评审重点）— 混合模式 Fanout：Push 为主 + Pull 兜底</h3>
+
+  <div class="tl-mode">
+    <div class="tl-mode-card push">
+      <div><span class="badge push">PUSH · 写扩散</span></div>
+      <h4>普通用户（粉丝 ≤ 1000）→ 发帖即推送</h4>
+      <p>发帖时把 post_id 写入所有粉丝的 <code>feed:home:{follower_id}</code> ZSet。读时间线 O(1) 直接 ZREVRANGE，读延迟最优。写放大 = 粉丝数。</p>
+    </div>
+    <div class="tl-mode-card pull">
+      <div><span class="badge pull">PULL · 读扩散</span></div>
+      <h4>大 V 用户（粉丝 &gt; 1000）→ 读时拉取</h4>
+      <p>发帖不推送，只写自己的 <code>feed:inbox:{author_id}</code>。粉丝读时间线时拉取关注的大 V 帖子 + 自己的 push 流，内存合并排序。避免明星发帖造成海量写放大（发帖风暴）。</p>
+      <p style="font-size:0.65rem;color:#888;margin-top:0.3rem">⚠️ 后续优化点：关注大量对象时，Pull 需多次查询 inbox，存在开销放大问题（可引入批量拉取/缓存合并）</p>
+    </div>
+  </div>
+
+  <div class="timeline-flow">
+    <div class="tl-step">
+      <div class="num">1</div>
+      <div class="body"><strong>发帖：</strong>PostService 本地事务写 <span style="font-family:monospace">posts</span> 表 → 快速响应客户端，不阻塞发帖主流程 → 事务提交后生产 <span style="color:#4caf50">post:created</span></div>
+    </div>
+    <div class="tl-step">
+      <div class="num">2</div>
+      <div class="body"><strong>Fanout Worker（异步消费 post:created）：</strong>推送粉丝 Timeline 的 Fanout 逻辑交由异步 Worker 执行，不阻塞发帖主流程 → 查作者粉丝列表（<span style="font-family:monospace">user:followers</span> ZSet 缓存）</div>
+    </div>
+    <div class="tl-step">
+      <div class="num">3</div>
+      <div class="body"><strong>分支：</strong>粉丝数 ≤ 1000 → <strong style="color:#4caf50">Push</strong>：post_id 批量 ZADD 进每个粉丝的 <span style="font-family:monospace">feed:home:{uid}</span>；粉丝数 &gt; 1000 → <strong style="color:#4a9eff">Pull</strong>：只写自己的 <span style="font-family:monospace">feed:inbox:{author_id}</span></div>
+    </div>
+    <div class="tl-step">
+      <div class="num">4</div>
+      <div class="body"><strong>读时间线：</strong>TimelineService 读取 <span style="font-family:monospace">feed:home:{uid}</span>（push 流）+ 各关注大 V 的 <span style="font-family:monospace">feed:inbox</span>（pull 流）→ 按 score（时间戳）合并 → ZREVRANGEBYSCORE 游标分页返回</div>
+    </div>
+    <div class="tl-step">
+      <div class="num">5</div>
+      <div class="body"><strong>缓存穿透保护：</strong>ZSet 命中 → 直接返回；未命中 → 回源 MySQL 查询最近 50 条关注者帖子重建缓存（读穿 + 重建锁）</div>
+    </div>
+    <div class="tl-step">
+      <div class="num">6</div>
+      <div class="body"><strong>容量控制：</strong>每个 ZSet 限制 500 条，超出淘汰最旧；TTL 7 天滑动续期，防止大 key 无限增长</div>
+    </div>
+    <div class="tl-step">
+      <div class="num">7</div>
+      <div class="body"><strong>一致性策略：</strong>帖子删除/更新<strong>不批量清理所有用户 Timeline</strong>；前端读取列表后，对帖子状态二次校验，过滤已删除/无效动态</div>
+    </div>
+    <div class="tl-step">
+      <div class="num">8</div>
+      <div class="body"><strong>关注变更处理：</strong>新增关注 → 拉取目标作者近期帖子写入用户 Timeline；取消关注 → 清理该作者相关动态（消费 <span style="color:#ff8c42">user:follow-changed</span>）</div>
+    </div>
+  </div>
+</div>
+
+<div class="svc-layout" style="grid-template-columns: 1fr 1fr">
+  <!-- 数据库表 -->
+  <div class="svc-box">
+    <h3>数据库表 (feed_db)</h3>
+    <div class="table-item">
+      <span class="tname">posts</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · user_id <span class="tag-idx">IDX</span> · content <span class="tag-idx">FULLTEXT</span> · media_url · like_count · comment_count · created_at <span class="tag-idx">IDX</span></div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">⚡ content 建 FULLTEXT 索引（MySQL 原生全文检索，ES 同步后搜索走 ES）</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">post_likes</span>
+      <div class="tcols"><span class="tag-pk">post_id + user_id PK</span> <span class="tag-fk">FK→posts.id</span> · created_at</div>
+      <div style="font-size:0.65rem;color:#4caf50;margin-top:0.25rem">⚡ 联合主键 → 点赞天然幂等</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">post_comments</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · post_id <span class="tag-idx">IDX</span> · user_id · content · created_at</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">outbox_events</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · topic · payload · status <span class="tag-idx">IDX</span> · retry_count · created_at</div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">📤 本地消息表（发件箱模式）：依托本地表保障 Kafka 投递，Worker 异步投递；配套<strong>定时补偿任务</strong>，扫描 status=pending 的事件重试发送失败消息</div>
+    </div>
+  </div>
+
+  <!-- Redis 缓存策略 -->
+  <div class="svc-box">
+    <h3>Redis 缓存策略</h3>
+    <div class="redis-item">
+      <span class="rkey">feed:home:{user_id}</span><span class="rtype">ZSet</span><span class="rtype ttl">TTL 7d 续期</span>
+      <div style="color:#888;margin-top:0.2rem">主页时间线（Push 流）· score=发布时间戳 · member=post_id · ZREVRANGEBYSCORE 分页 · 上限 500 条</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">feed:inbox:{author_id}</span><span class="rtype">ZSet</span><span class="rtype ttl">TTL 7d 续期</span>
+      <div style="color:#888;margin-top:0.2rem">大 V 发帖流（Pull 流）· 粉丝读时合并拉取</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">post:detail:{id}</span><span class="rtype">String</span><span class="rtype ttl">TTL 30min</span>
+      <div style="color:#888;margin-top:0.2rem">帖子详情缓存 · JSON 序列化 · 更新后删除</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">post:likes:{id}</span><span class="rtype">String</span><span class="rtype ttl">TTL 30min</span>
+      <div style="color:#888;margin-top:0.2rem">点赞计数缓存 · <strong>近似值</strong>，最终数据以 MySQL 为准（异步回写校准）</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">feed:lock:{user_id}</span><span class="rtype">SETNX</span><span class="rtype ttl">TTL 5s</span>
+      <div style="color:#888;margin-top:0.2rem">时间线重建锁 · 防止缓存击穿并发回源</div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#ff8c42;margin-top:0.5rem">
+  <p style="font-size:0.8rem;color:#ccc"><strong>ES 同步链路（MySQL → Kafka → ES）：</strong></p>
+  <p style="font-size:0.72rem;color:#888;margin-top:0.3rem">
+    发帖/点赞/评论 → 本地事务写 feed_db（<strong>MySQL 为帖子权威数据源</strong>）→ outbox_events（发件箱）→ Worker 投递 <span style="color:#4caf50">post:created</span> / <span style="color:#4caf50">post:liked</span> 到 Kafka<br>
+    → <strong>ES Sync Consumer</strong> 消费 → 写入 Elasticsearch（posts 索引：content + author_id + created_at）<br>
+    → 搜索接口读 ES（不读 MySQL）· <strong>ES 仅提供全文检索能力，不作为主写入存储</strong>
+  </p>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ Feed Service + Timeline 信息流是否符合预期？下一模块：Video Service (Go)</span>
+</div>

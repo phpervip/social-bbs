@@ -1,0 +1,198 @@
+<h2>🚪 API Gateway 内部架构</h2>
+<p class="subtitle">Node.js (Fastify) — 单点收敛 · 鉴权 · 限流 · 转发</p>
+
+<style>
+  .gw-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .gw-main { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .gw-sidebar { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .gw-layer { border: 1px solid #2a2a4a; border-radius: 6px; margin-bottom: 0.75rem; overflow: hidden; }
+  .gw-layer-title { background: #16213e; padding: 0.4rem 0.75rem; font-size: 0.75rem; color: #aaa; font-weight: 600; border-bottom: 1px solid #2a2a4a; }
+  .gw-layer-body { padding: 0.5rem 0.75rem; }
+  .gw-plugin { display: inline-block; background: #1a2744; border: 1px solid #2a2a5a; border-radius: 4px; padding: 0.25rem 0.5rem; margin: 0.2rem; font-size: 0.72rem; color: #ccc; }
+  .gw-plugin.highlight { border-color: #6c63ff; background: #1f2a50; color: #fff; }
+  .gw-plugin.blue { border-color: #4a9eff; }
+  .gw-plugin.orange { border-color: #ff8c42; }
+  .gw-flow { display: flex; align-items: center; justify-content: center; gap: 0.4rem; font-size: 0.75rem; color: #888; padding: 0.4rem 0; }
+  .gw-route { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; display: flex; justify-content: space-between; align-items: center; }
+  .gw-route .method { font-family: monospace; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
+  .gw-route .method.get { background: #1a3a6a; color: #4a9eff; }
+  .gw-route .method.post { background: #1a3a2a; color: #4caf50; }
+  .gw-route .method.put { background: #3a2a1a; color: #ff8c42; }
+  .gw-route .method.del { background: #3a1a1a; color: #f44336; }
+  .gw-route .path { font-family: monospace; font-size: 0.8rem; color: #fff; margin: 0 0.5rem; }
+  .gw-route .target { font-size: 0.7rem; color: #888; }
+  .gw-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0.5rem 0; }
+  .gw-metric { background: #16213e; border-radius: 6px; padding: 0.5rem; text-align: center; }
+  .gw-metric .val { font-size: 1rem; color: #fff; font-weight: 600; }
+  .gw-metric .lbl { font-size: 0.65rem; color: #666; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.75rem">
+  <div class="node" style="min-width:80px"><h4>🌐 前端</h4><p>HTTP/HTTPS</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node gateway" style="min-width:120px"><h4>🚪 API Gateway</h4><p>Fastify</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node" style="min-width:80px"><h4>📡 后端微服务</h4><p>gRPC</p></div>
+</div>
+
+<div class="gw-grid">
+  <div class="gw-main">
+    <h3 style="font-size:0.9rem;color:#fff;margin-bottom:0.5rem">内部中间件链（请求入站 → 响应出站）</h3>
+
+    <div class="gw-layer">
+      <div class="gw-layer-title">① 前置过滤层</div>
+      <div class="gw-layer-body">
+        <span class="gw-plugin">CORS 跨域</span>
+        <span class="gw-plugin">Request ID 注入</span>
+        <span class="gw-plugin">请求日志 (pino)</span>
+        <span class="gw-plugin">请求体大小限制</span>
+        <p style="font-size:0.7rem;color:#666;margin-top:0.3rem">所有请求必经，记录 traceId 用于全链路追踪</p>
+      </div>
+    </div>
+
+    <div class="gw-layer">
+      <div class="gw-layer-title">② 鉴权 & 安全层</div>
+      <div class="gw-layer-body">
+        <span class="gw-plugin highlight">JWT 校验</span>
+        <span class="gw-plugin highlight">Token 黑名单检查</span>
+        <span class="gw-plugin">IP 白名单</span>
+        <span class="gw-plugin">CORS Origin 校验</span>
+        <p style="font-size:0.7rem;color:#666;margin-top:0.3rem">
+          🔓 公开路由（<code>/api/auth/login</code>, <code>/api/auth/register</code>）跳过 JWT 校验<br>
+          &nbsp;&nbsp;&nbsp;但依然执行限流、IP 黑名单、CORS 安全校验<br>
+          🔒 受保护路由从 Header 提取 JWT，校验签名 + 过期时间，注入 <code>request.user</code><br>
+          🚫 Token 黑名单（登出后失效）通过 Redis 校验，TTL 与 JWT 有效期保持一致，自动过期清理
+        </p>
+      </div>
+    </div>
+
+    <div class="gw-layer">
+      <div class="gw-layer-title">③ 限流 & 治理层</div>
+      <div class="gw-layer-body">
+        <span class="gw-plugin orange">速率限制 (Rate Limit)</span>
+        <span class="gw-plugin orange">并发控制</span>
+        <span class="gw-plugin">超时控制 (Timeout)</span>
+        <span class="gw-plugin">熔断 (Circuit Breaker)</span>
+        <p style="font-size:0.7rem;color:#666;margin-top:0.3rem">
+          ⏱ 基于 Redis 滑动窗口：未登录 30r/min，已登录 100r/min，发布/上传 10r/min<br>
+          🛑 各下游微服务拥有独立熔断策略，单一服务故障不影响其他业务路由<br>
+          &nbsp;&nbsp;&nbsp;连续 5 次失败触发熔断，30s 后半开恢复
+        </p>
+      </div>
+    </div>
+
+    <div class="gw-layer">
+      <div class="gw-layer-title">④ 路由转发层</div>
+      <div class="gw-layer-body">
+        <span class="gw-plugin blue">请求路由匹配</span>
+        <span class="gw-plugin blue">gRPC 协议转换</span>
+        <span class="gw-plugin blue">负载均衡</span>
+        <span class="gw-plugin blue">重试 (幂等请求)</span>
+        <p style="font-size:0.7rem;color:#666;margin-top:0.3rem">
+          Fastify 路由 → 转换为 protobuf → gRPC 调用下游<br>
+          K8s Service DNS 做客户端负载均衡<br>
+          🔁 重试仅对 GET 等幂等接口启用，POST 写入接口禁用自动重试，避免重复请求
+        </p>
+      </div>
+    </div>
+
+    <div class="gw-layer">
+      <div class="gw-layer-title">⑤ 后置处理层</div>
+      <div class="gw-layer-body">
+        <span class="gw-plugin">响应格式统一</span>
+        <span class="gw-plugin">错误码映射</span>
+        <span class="gw-plugin">Prometheus 指标</span>
+        <p style="font-size:0.7rem;color:#666;margin-top:0.3ms">统一响应体 <code>{ code, message, data }</code>，gRPC 错误码 → HTTP 状态码映射</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="gw-sidebar">
+    <h3 style="font-size:0.9rem;color:#fff;margin-bottom:0.5rem">路由表</h3>
+
+    <div class="gw-route">
+      <div><span class="method post">POST</span><span class="path">/api/auth/login</span></div>
+      <span class="target">→ User Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method post">POST</span><span class="path">/api/auth/register</span></div>
+      <span class="target">→ User Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method get">GET</span><span class="path">/api/user/:id</span></div>
+      <span class="target">→ User Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method put">PUT</span><span class="path">/api/user/profile</span></div>
+      <span class="target">→ User Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method get">GET</span><span class="path">/api/feed/home</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method post">POST</span><span class="path">/api/feed/post</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method get">GET</span><span class="path">/api/feed/post/:id</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method del">DEL</span><span class="path">/api/feed/post/:id</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method post">POST</span><span class="path">/api/feed/like</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method post">POST</span><span class="path">/api/feed/comment</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method get">GET</span><span class="path">/api/search</span></div>
+      <span class="target">→ Feed Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method post">POST</span><span class="path">/api/video/upload</span></div>
+      <span class="target">→ Video Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method get">GET</span><span class="path">/api/video/:id</span></div>
+      <span class="target">→ Video Service</span>
+    </div>
+    <div class="gw-route">
+      <div><span class="method get">GET</span><span class="path">/ws/notifications</span></div>
+      <span class="target">→ WS Upgrade 🔐</span>
+    </div>
+    <p style="font-size:0.65rem;color:#ff8c42;margin:0.2rem 0.75rem 0.5rem;text-align:right">WebSocket 握手请求完整走鉴权中间件，非法 Token 直接拒绝升级</p>
+
+    <div class="gw-metrics">
+      <div class="gw-metric"><div class="val">3</div><div class="lbl">后端服务</div></div>
+      <div class="gw-metric"><div class="val">14</div><div class="lbl">路由规则</div></div>
+      <div class="gw-metric"><div class="val">Fastify</div><div class="lbl">框架</div></div>
+      <div class="gw-metric"><div class="val">gRPC</div><div class="lbl">内网协议</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="margin-top:1rem;border-color:#4a9eff;border-style:solid">
+  <p style="font-size:0.8rem;color:#ccc"><strong>WebSocket 升级路径：</strong></p>
+  <p style="font-size:0.72rem;color:#888;margin-top:0.3rem">
+    <code>GET /ws/notifications</code> → Gateway 完整走②鉴权层（JWT + 黑名单 + 限流）→ 升级 WebSocket → Notification Service 通过内部通道推送 → Gateway 转发给前端<br>
+    <span style="color:#f44336">非法 Token 直接拒绝 401 升级，不建立 WS 连接</span>
+  </p>
+</div>
+
+<div class="flow-box" style="border-color:#ff8c42">
+  <p style="font-size:0.8rem;color:#ccc"><strong>统一响应格式：</strong></p>
+  <p style="font-size:0.72rem;color:#888;margin-top:0.3rem;font-family:monospace">
+    { "code": 0, "message": "success", "data": { ... } }<br>
+    { "code": 401, "message": "unauthorized", "data": null }
+  </p>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ Gateway 设计是否符合预期？进入下一模块：User Service 详细设计</span>
+</div>

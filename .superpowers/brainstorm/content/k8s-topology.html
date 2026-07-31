@@ -1,0 +1,151 @@
+<h2>🐳 K8s 部署拓扑（Kind）</h2>
+<p class="subtitle">本地 Kind 集群 · Ingress-NGINX · 微服务 × 中间件全拓扑</p>
+
+<style>
+  .k8s-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.7rem; color: #888; margin: 0.5rem 0 1rem; }
+  .k8s-legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -2px; }
+  .lg-deploy { background: #4a9eff; } .lg-stateful { background: #ff8c42; } .lg-infra { background: #9c6cff; } .lg-remote { background: #4caf50; }
+  .cluster-box { background: #0d1b2a; border: 2px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; margin: 0.5rem 0; position: relative; }
+  .cluster-box .cluster-title { position: absolute; top: -0.75rem; left: 1rem; background: #2a2a4a; color: #fff; font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.75rem; border-radius: 999px; }
+  .node-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
+  .node-pod { border: 1px solid #2a2a4a; border-radius: 8px; background: #16213e; padding: 0.6rem; }
+  .node-pod h5 { font-size: 0.72rem; color: #fff; margin-bottom: 0.4rem; display: flex; justify-content: space-between; align-items: center; }
+  .node-pod .role { font-size: 0.6rem; color: #888; font-weight: 400; }
+  .pod-list { display: flex; flex-direction: column; gap: 0.3rem; }
+  .pod-item { font-size: 0.68rem; color: #aaa; font-family: monospace; padding: 0.3rem 0.5rem; border-radius: 4px; background: #0d1b2a; border-left: 3px solid #4a9eff; display: flex; justify-content: space-between; }
+  .pod-item.repl { border-left-color: #4caf50; }
+  .pod-item.infra { border-left-color: #9c6cff; }
+  .pod-item .tag { color: #4caf50; font-size: 0.58rem; }
+  .pod-item .tag.pending { color: #ff8c42; }
+  .pod-item .tag.infrast { color: #9c6cff; }
+  .infra-banner { background: #16213e; border: 1px solid #9c6cff; border-radius: 8px; padding: 0.6rem 0.75rem; margin-top: 0.75rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+  .infra-chip { font-family: monospace; font-size: 0.7rem; color: #ccc; background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 999px; padding: 0.25rem 0.75rem; }
+  .infra-chip b { color: #9c6cff; }
+  .infra-chip.green b { color: #4caf50; }
+  .notes { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.75rem; color: #bbb; line-height: 1.7; margin: 0.5rem 0; }
+  .notes b { color: #fff; }
+  .notes .k { font-family: monospace; color: #4a9eff; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.5rem">
+  <div class="node gateway" style="min-width:110px"><h4>🌐 Browser</h4><p>http://b.local</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node highlight" style="min-width:110px"><h4>🚪 Ingress-NGINX</h4><p>NodePort 80</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node" style="min-width:100px"><h4>📦 Kind Cluster</h4><p>1 control-plane + 2 worker</p></div>
+</div>
+
+<div class="k8s-legend">
+  <span><span class="lg-deploy"></span>Deployment（无状态微服务）</span>
+  <span><span class="lg-stateful"></span>StatefulSet（有状态）</span>
+  <span><span class="lg-infra"></span>基础设施中间件</span>
+  <span><span class="lg-remote"></span>外部模拟（非集群内）</span>
+</div>
+
+<div class="cluster-box">
+  <span class="cluster-title">📦 Kind Cluster · ns: default</span>
+  <div class="node-grid">
+    <!-- control-plane -->
+    <div class="node-pod">
+      <h5>control-plane <span class="role">kubeadm 管理面</span></h5>
+      <div class="pod-list">
+        <div class="pod-item"><span>Ingress-NGINX</span><span class="tag">Controller</span></div>
+        <div class="pod-item infra"><span>Metallb / NodePort</span><span class="tag infrast">网络</span></div>
+      </div>
+    </div>
+    <!-- worker-1 -->
+    <div class="node-pod">
+      <h5>worker-1 <span class="role">业务 Pod</span></h5>
+      <div class="pod-list">
+        <div class="pod-item repl"><span>gateway (Node) ×2</span><span class="tag">Deploy</span></div>
+        <div class="pod-item repl"><span>user-service (Java) ×2</span><span class="tag">Deploy</span></div>
+        <div class="pod-item repl"><span>feed-service (Go) ×2</span><span class="tag">Deploy</span></div>
+        <div class="pod-item repl"><span>video-service (Go) ×2</span><span class="tag">Deploy</span></div>
+        <div class="pod-item repl"><span>notification-service ×2</span><span class="tag">Deploy</span></div>
+        <div class="pod-item repl"><span>search-service (Go) ×2</span><span class="tag">Deploy</span></div>
+      </div>
+    </div>
+    <!-- worker-2 -->
+    <div class="node-pod">
+      <h5>worker-2 <span class="role">数据 Pod</span></h5>
+      <div class="pod-list">
+        <div class="pod-item infra"><span>MySQL (StatefulSet)</span><span class="tag infrast">Sts</span></div>
+        <div class="pod-item infra"><span>Redis (StatefulSet)</span><span class="tag infrast">Sts</span></div>
+        <div class="pod-item infra"><span>Kafka (StatefulSet)</span><span class="tag infrast">Sts</span></div>
+        <div class="pod-item infra"><span>Elasticsearch (StatefulSet)</span><span class="tag infrast">Sts</span></div>
+        <div class="pod-item infra"><span>MinIO (StatefulSet) — S3 替代</span><span class="tag infrast">Sts</span></div>
+        <div class="pod-item"><span>FFmpeg Worker (Job/Deploy) ×1</span><span class="tag pending">转码</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="infra-banner">
+    <span style="font-size:0.75rem;color:#9c6cff;font-weight:700">基础设施（StatefulSet）</span>
+    <span class="infra-chip"><b>MySQL</b> 8.0 · PV 持久化 · 1 主</span>
+    <span class="infra-chip"><b>Redis</b> 7 · PV · 单实例</span>
+    <span class="infra-chip"><b>Kafka</b> KRaft 单节点 + ZooKeeper 弃用</span>
+    <span class="infra-chip"><b>ES</b> 8 + IK 分词器 · PV</span>
+    <span class="infra-chip green"><b>MinIO</b> 模拟 S3（演示环境，生产换 AWS S3）</span>
+    <span class="infra-chip green"><b>HLS</b> Nginx 静态服务（MinIO 桶直读）</span>
+  </div>
+</div>
+
+<!-- 服务发现 & 网络 -->
+<div class="svc-box" style="border:2px solid #4a9eff;margin-top:1rem">
+  <h3>⭐ 服务发现 & 网络</h3>
+  <div class="notes">
+    <b>K8s Service（ClusterIP）</b>：每个微服务暴露 <span class="k">{service-name}.default.svc.cluster.local</span> 内部 DNS，gRPC 直连 · 前端静态资源经 <span class="k">Ingress</span> 路由 <b>b.local</b> → gateway · WebSocket 走 <span class="k">Ingress annotations</span>（upgrade 头透传）<br>
+    <b>Nginx Ingress 规则</b>：<span class="k">b.local/api/*</span> → gateway:8080（HTTP）· <span class="k">b.local/ws/*</span> → gateway:8081（WebSocket）· <span class="k">b.local/hls/*</span> → hls 静态服务<br>
+    <b>跨服务调用</b>：统一走 gRPC（user-service:9000 / feed-service:9000 / video-service:9000 / search-service:9000），Kafka 事件总线经 <span class="k">kafka:9092</span> · 配置用 <span class="k">ConfigMap</span> 下发，密钥用 <span class="k">Secret</span>
+  </div>
+</div>
+
+<div class="svc-layout" style="margin-top:0.5rem">
+  <!-- 左：部署策略 -->
+  <div class="svc-box">
+    <h3>部署策略</h3>
+    <div class="notes">
+      <b>Deployment ×2 副本</b>（无状态微服务）：滚动更新 <span class="k">maxSurge=1 / maxUnavailable=0</span> · 存活/就绪探针（<span class="k">/healthz</span> gRPC 健康检查）<br>
+      <b>StatefulSet ×1</b>（MySQL/Redis/Kafka/ES/MinIO）：<span class="k">PVC</span> 持久化，Pod 重建数据不丢 · 有状态服务不做水平扩容（演示环境）<br>
+      <b>FFmpeg Worker</b>：任务消费组件，从 Kafka 消费转码任务 · <strong>依靠分布式锁防止重复消费</strong>（video:transcode-task 事件 + Redis 锁，同一任务只被一个 Worker 处理）· 失败重试 3 次 + 死信<br>
+      <b>资源限制</b>：requests/limits 按服务配置（CPU/内存），防止 Pod 互相挤占
+    </div>
+  </div>
+  <!-- 右：外部模拟 -->
+  <div class="svc-box">
+    <h3>外部依赖（本地模拟）</h3>
+    <div class="notes">
+      <b>MinIO</b>：替代 AWS S3（桶：<span class="k">videos / uploads / avatars</span>）· 预签名 URL 直传/直读<br>
+      <b>HLS 静态服务</b>：Nginx 容器 serve <span class="k">.m3u8 / .ts</span> 文件（MinIO 桶挂载或 CDN 直读）<br>
+      <b>本机 hosts</b>：<span class="k">127.0.0.1 b.local</span> → NodePort 80 → Ingress<br>
+      <b>演示说明</b>：生产环境对应 AWS S3 + CloudFront CDN + Imperva WAF，本机用 MinIO + Nginx 等价替代
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#ff8c42;margin-top:0.5rem;border-width:2px">
+  <p style="font-size:0.8rem;color:#ff8c42"><strong>⚠️ 环境说明：Kind 仅用于本地架构演示，禁止生产部署</strong></p>
+  <div class="notes">
+    <b>集群局限</b>：单宿主机运行，无硬件故障容灾；<span class="k">Local PV</span> 不支持 Pod 跨节点迁移（节点宕机数据不可达）<br>
+    <b>中间件简化</b>：Kafka 单节点、Redis 单实例、ES 无副本 — 均为演示简化；<strong>生产部署需多副本（Kafka ≥3 节点、Redis 主从/集群、ES 多副本）保障数据安全</strong>
+  </div>
+</div>
+
+<div class="svc-box" style="border:2px solid #4caf50;margin-top:0.5rem">
+  <h3>⭐ 扩展规划 & 扩缩容</h3>
+  <div class="notes">
+    <b>监控</b>：可接入 <span class="k">Prometheus + Grafana</span>（指标采集 / 可视化面板）· <span class="k">Loki</span> 日志聚合系统 · <span class="k">NetworkPolicy</span> 网络隔离（默认拒绝 + 白名单放行）<br>
+    <b>HPA 自动扩缩容</b>：<strong>业务微服务</strong>（gateway / user / feed / video / notification / search）支持 HPA（CPU/内存阈值触发）· <strong>有状态组件</strong>（MySQL / Kafka / ES / Redis）<strong>不启用 HPA</strong>（扩容需人工评估数据分片/副本策略）
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#4caf50;margin-top:0.5rem">
+  <p style="font-size:0.8rem;color:#ccc"><strong>🔗 完整请求链路：</strong></p>
+  <div class="notes">
+    Browser → <span class="k">b.local</span> (NodePort:80) → Ingress-Nginx → <span class="k">Gateway(8080)</span> → gRPC Service(DNS) → MySQL / Redis / Kafka / MinIO → <span class="k">HLS 静态资源</span> → Browser 播放器
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ K8s 部署拓扑（Kind）是否符合预期？下一模块：前端 UI 设计（极简 B 风格）</span>
+</div>

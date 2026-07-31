@@ -1,0 +1,177 @@
+<h2>🧩 Module Federation 微前端架构</h2>
+<p class="subtitle">Webpack 5 Module Federation — Shell(Host) + 3 个 Remote</p>
+
+<style>
+  .mf-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.75rem; margin: 1rem 0; }
+  .mf-card { background: #16213e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .mf-card.host { border-color: #6c63ff; background: #1f2a50; grid-column: 1 / -1; }
+  .mf-card h4 { font-size: 0.85rem; color: #fff; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .mf-card p { font-size: 0.75rem; color: #999; line-height: 1.5; }
+  .mf-card ul { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+  .mf-card li { font-size: 0.75rem; color: #aaa; padding: 0.2rem 0; display: flex; align-items: center; gap: 0.4rem; }
+  .mf-card li::before { content: "•"; color: #6c63ff; }
+  .mf-tag { display: inline-block; font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 3px; background: #1a3a2a; color: #4caf50; margin-left: 0.3rem; }
+  .mf-tag.blue { background: #1a3a6a; color: #4a9eff; }
+  .mf-tag.orange { background: #3a2a1a; color: #ff8c42; }
+  .mf-tag.red { background: #3a1a1a; color: #f44336; }
+  .routes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 0.5rem 0; }
+  .route { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; }
+  .route .path { font-family: monospace; font-size: 0.8rem; color: #4a9eff; }
+  .route .desc { font-size: 0.7rem; color: #888; margin-top: 0.2rem; }
+  .flow-box { background: #0d1b2a; border: 1px dashed #2a2a5a; border-radius: 6px; padding: 0.75rem; margin: 0.5rem 0; }
+  .flow-box.blue-border { border-color: #4a9eff; border-style: solid; }
+  .flow-box.orange-border { border-color: #ff8c42; }
+  .flow-box.green-border { border-color: #4caf50; }
+  .principle-row { display: flex; gap: 0.75rem; margin: 0.5rem 0; flex-wrap: wrap; }
+  .principle-card { flex: 1; min-width: 200px; background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.75rem; }
+  .principle-card h4 { font-size: 0.8rem; color: #fff; margin-bottom: 0.3rem; }
+  .principle-card p { font-size: 0.72rem; color: #999; line-height: 1.5; }
+  .principle-card .icon { font-size: 1.2rem; margin-bottom: 0.3rem; }
+</style>
+
+<div class="section">
+  <h3>应用拆分</h3>
+  <div class="mf-grid">
+    <div class="mf-card host">
+      <h4>🏠 Shell (Host) <span class="mf-tag">Webpack Host</span></h4>
+      <p>基座应用，负责整体布局、路由分发、登录状态管理。加载 Remote 子应用的组件。</p>
+      <ul>
+        <li>全局布局（左侧导航栏 + 右侧内容区）</li>
+        <li>路由分发：/login, /register → User Remote；/home, /trending → Feed Remote；/video → Video Remote</li>
+        <li>极简「B」Logo — 纯 CSS 几何字标</li>
+        <li>统一持久化 JWT Token，向外共享 <strong>API Client 实例</strong></li>
+        <li>全局 <strong>EventBus</strong>（发布订阅），同步登录状态给所有 Remote 子应用</li>
+        <li>Error Boundary 全局兜底 — 子应用加载异常/运行时错误故障隔离</li>
+        <li>Loading Skeleton 统一加载态</li>
+      </ul>
+    </div>
+    <div class="mf-card">
+      <h4>👤 User Remote <span class="mf-tag blue">Remote</span></h4>
+      <p>用户相关功能子应用，独立部署。</p>
+      <ul>
+        <li>注册 / 登录页面</li>
+        <li>个人主页（帖子列表、粉丝/关注数）</li>
+        <li>编辑个人资料</li>
+        <li>关注/取关操作</li>
+      </ul>
+    </div>
+    <div class="mf-card">
+      <h4>📰 Feed Remote <span class="mf-tag blue">Remote</span></h4>
+      <p>Feed 流相关功能子应用，独立部署。</p>
+      <ul>
+        <li>主页时间线（关注者帖子流）</li>
+        <li>发帖 / 删帖</li>
+        <li>点赞 / 评论</li>
+        <li>搜索帖子 + 用户</li>
+      </ul>
+    </div>
+    <div class="mf-card">
+      <h4>🎬 Video Remote <span class="mf-tag blue">Remote</span></h4>
+      <p>视频相关功能子应用，独立部署。</p>
+      <ul>
+        <li>视频上传页面（分片上传）</li>
+        <li>视频播放器（HLS.js）</li>
+        <li>视频详情页</li>
+        <li>视频转码状态展示</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>关键架构原则</h3>
+  <div class="principle-row">
+    <div class="principle-card">
+      <div class="icon">🔐</div>
+      <h4>鉴权：EventBus 替代 Context</h4>
+      <p>Shell 统一持久化 JWT，向外共享 <strong>API Client 实例</strong>。通过全局 EventBus 发布 <code>auth:login</code> / <code>auth:logout</code> 事件同步登录状态给所有 Remote。规避 React Context 在 Module Federation 跨应用隔离的限制。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">🚫</div>
+      <h4>跨子应用通信：禁止直接依赖</h4>
+      <p>Remote 子应用之间 <strong>禁止直接依赖、禁止直接调用</strong>。所有跨模块事件通信统一通过 Shell 提供的全局 <strong>EventBus</strong>（发布订阅模式）。保持子应用独立性和解耦。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">🛡️</div>
+      <h4>故障隔离：Error Boundary</h4>
+      <p>Shell 基座全局捕获子应用加载异常、运行时错误。单个子应用崩溃不影响整体网站，其余 Remote 正常运作。实现故障隔离。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">📡</div>
+      <h4>统一网络层：共享 API Client</h4>
+      <p>所有子应用复用 Shell 基座共享的 <strong>API Client 实例</strong>，统一处理 Token 注入、401 拦截刷新、接口异常拦截。子应用不单独新建网络请求实例。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>路由设计</h3>
+  <div class="routes-grid">
+    <div class="route"><span class="path">/</span><div class="desc">Shell 主页 → 重定向到 /home</div></div>
+    <div class="route"><span class="path">/login</span><div class="desc">User Remote — 登录页</div></div>
+    <div class="route"><span class="path">/register</span><div class="desc">User Remote — 注册页</div></div>
+    <div class="route"><span class="path">/home</span><div class="desc">Feed Remote — 关注时间线</div></div>
+    <div class="route"><span class="path">/profile/:id</span><div class="desc">User Remote — 个人主页</div></div>
+    <div class="route"><span class="path">/post/:id</span><div class="desc">Feed Remote — 帖子详情</div></div>
+    <div class="route"><span class="path">/search?q=</span><div class="desc">Feed Remote — 搜索</div></div>
+    <div class="route"><span class="path">/video</span><div class="desc">Video Remote — 视频首页</div></div>
+    <div class="route"><span class="path">/video/:id</span><div class="desc">Video Remote — 播放页</div></div>
+    <div class="route"><span class="path">/upload</span><div class="desc">Video Remote — 上传页</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Shell 向外共享</h3>
+  <div class="flow-box green-border">
+    <p style="font-size:0.8rem;color:#ccc;margin-bottom:0.5rem"><strong>共享实例</strong>（所有 Remote 共用同一实例）：</p>
+    <div style="display:flex;flex-wrap:wrap;gap:0.4rem">
+      <span class="tech-tag" style="border-color:#6c63ff">API Client (Axios 封装)</span>
+      <span class="tech-tag" style="border-color:#6c63ff">EventBus (发布订阅)</span>
+      <span class="tech-tag" style="border-color:#6c63ff">Layout (Sidebar + Content)</span>
+      <span class="tech-tag" style="border-color:#6c63ff">Loading Skeleton</span>
+      <span class="tech-tag" style="border-color:#6c63ff">ErrorBoundary</span>
+      <span class="tech-tag" style="border-color:#ff8c42">⚠️ 不含 AuthContext</span>
+    </div>
+  </div>
+  <div class="flow-box" style="border-color:#4a9eff;border-style:solid">
+    <p style="font-size:0.8rem;color:#ccc;margin-bottom:0.5rem"><strong>共享依赖</strong>（singleton 模式，避免重复加载）：</p>
+    <div style="display:flex;flex-wrap:wrap;gap:0.4rem">
+      <span class="tech-tag">react</span>
+      <span class="tech-tag">react-dom</span>
+      <span class="tech-tag">react-router-dom</span>
+      <span class="tech-tag">axios</span>
+      <span class="tech-tag">@mui/material (可选)</span>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>EventBus 事件列表</h3>
+  <div class="routes-grid">
+    <div class="route"><span class="path" style="color:#ff8c42">auth:login</span><div class="desc">Shell → Remote：用户登录成功，携带 Token</div></div>
+    <div class="route"><span class="path" style="color:#ff8c42">auth:logout</span><div class="desc">Shell → Remote：用户登出</div></div>
+    <div class="route"><span class="path" style="color:#4caf50">post:created</span><div class="desc">Feed Remote → Shell：新帖子发布，通知其他子应用</div></div>
+    <div class="route"><span class="path" style="color:#4caf50">video:transcoded</span><div class="desc">Video Remote → Shell：视频转码完成</div></div>
+    <div class="route"><span class="path" style="color:#4a9eff">profile:updated</span><div class="desc">User Remote → Shell：个人资料更新</div></div>
+    <div class="route"><span class="path" style="color:#4a9eff">notification:new</span><div class="desc">Shell → Remote：新通知到达，各子应用更新角标</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>构建 & 部署</h3>
+  <div class="flow-box blue-border">
+    <p style="font-size:0.8rem;color:#ccc">每个子应用独立构建、独立部署、独立版本号：</p>
+    <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;justify-content:center">
+      <span class="tech-tag" style="border-color:#6c63ff">shell.example.com</span>
+      <span class="sync-arrow">→</span>
+      <span class="tech-tag" style="border-color:#4a9eff">user.example.com/remoteEntry.js</span>
+      <span class="tech-tag" style="border-color:#4a9eff">feed.example.com/remoteEntry.js</span>
+      <span class="tech-tag" style="border-color:#4a9eff">video.example.com/remoteEntry.js</span>
+    </div>
+    <p style="font-size:0.7rem;color:#666;margin-top:0.5rem;text-align:center">Shell 在运行时动态加载 remoteEntry.js，子应用独立发布不影响其他模块</p>
+  </div>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>✅ 鉴权/通信/隔离机制已修正 — 进入下一模块？</span>
+</div>

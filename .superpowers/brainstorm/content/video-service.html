@@ -1,0 +1,239 @@
+<h2>🎬 Video Service 详细设计</h2>
+<p class="subtitle">Go · Handler → Service → Repository · 分片上传 · S3 流水线 · FFmpeg 异步转码 · HLS 分发 · 权限 · 缩略图</p>
+
+<style>
+  .svc-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .svc-box { background: #0d1b2a; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; }
+  .svc-box h3 { font-size: 0.9rem; color: #fff; margin-bottom: 0.75rem; }
+  .layer-stack { display: flex; flex-direction: column; gap: 0.4rem; }
+  .layer { border: 1px solid #2a2a4a; border-radius: 6px; background: #16213e; }
+  .layer-title { padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; color: #fff; border-bottom: 1px solid #2a2a4a; border-radius: 6px 6px 0 0; }
+  .layer-body { padding: 0.5rem 0.75rem; font-size: 0.72rem; color: #999; }
+  .layer-body .fn { color: #4a9eff; font-family: monospace; }
+  .layer-body .producer { color: #4caf50; font-family: monospace; }
+  .layer-body .consumer { color: #ff8c42; font-family: monospace; }
+  .layer.handler .layer-title { background: #1a2a4a; }
+  .layer.service .layer-title { background: #1a3a2a; }
+  .layer.repository .layer-title { background: #3a2a1a; }
+  .dep-item { display: flex; align-items: center; gap: 0.5rem; background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.75rem; color: #ccc; }
+  .dep-item .conn { color: #4a9eff; font-family: monospace; font-size: 0.7rem; }
+  .dep-item .conn.async { color: #ff8c42; }
+  .table-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; }
+  .table-item .tname { font-family: monospace; font-size: 0.78rem; color: #fff; }
+  .table-item .tcols { font-size: 0.68rem; color: #888; margin-top: 0.25rem; }
+  .table-item .tag-pk { color: #4a9eff; } .table-item .tag-fk { color: #ff8c42; } .table-item .tag-idx { color: #4caf50; }
+  .redis-item { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; font-size: 0.72rem; }
+  .redis-item .rkey { font-family: monospace; font-size: 0.75rem; color: #fff; }
+  .redis-item .rtype { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #1a3a2a; color: #4caf50; margin-left: 0.4rem; }
+  .redis-item .rtype.ttl { background: #3a2a1a; color: #ff8c42; }
+  .legend-mini { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.7rem; color: #888; margin: 0.5rem 0; }
+  .legend-mini span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -2px; }
+  .lg-grpc { background: #4a9eff; } .lg-kafka-p { background: #4caf50; } .lg-kafka-c { background: #ff8c42; }
+  .pipeline { background: #0d1b2a; border: 2px solid #6c63ff; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+  .pl-step { display: flex; gap: 0.75rem; margin: 0.5rem 0; align-items: flex-start; }
+  .pl-step .num { background: #6c63ff; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem; }
+  .pl-step .body { font-size: 0.75rem; color: #bbb; line-height: 1.5; }
+  .pl-step .body strong { color: #fff; }
+  .pl-step .body .mono { font-family: monospace; color: #4a9eff; }
+  .pl-step .body .async { font-family: monospace; color: #ff8c42; }
+  .pl-step .body .ok { font-family: monospace; color: #4caf50; }
+</style>
+
+<div class="flow-row" style="margin-bottom:0.5rem">
+  <div class="node gateway" style="min-width:90px"><h4>🚪 Gateway</h4><p>gRPC 调用</p></div>
+  <span class="sync-arrow">→</span>
+  <div class="node highlight" style="min-width:110px"><h4>🎬 Video Service</h4><p>Go</p></div>
+  <span class="async-arrow">─ ─ →</span>
+  <div class="node async" style="min-width:90px"><h4>📨 Kafka</h4><p>转码任务</p></div>
+</div>
+
+<div class="legend-mini">
+  <span><span class="lg-grpc"></span>对外 gRPC 接口</span>
+  <span><span class="lg-kafka-p"></span>生产 Kafka 事件</span>
+  <span><span class="lg-kafka-c"></span>消费 Kafka 事件</span>
+</div>
+
+<div class="svc-layout">
+  <!-- 左列：内部三层 -->
+  <div class="svc-box">
+    <h3>内部三层架构</h3>
+    <div class="layer-stack">
+      <div class="layer handler">
+        <div class="layer-title">Handler 层 <span style="color:#4a9eff;font-size:0.65rem">(gRPC 入口)</span></div>
+        <div class="layer-body">
+          <span class="fn">VideoServiceGrpc</span> — InitUpload / UploadChunk / CompleteUpload / GetVideo / GetPlaybackURL / DeleteVideo / GetTranscodeStatus<br>
+          <span style="color:#666">校验分片序号、尺寸；协议转换，无业务逻辑</span>
+        </div>
+      </div>
+      <div class="layer service">
+        <div class="layer-title">Service 层 <span style="color:#4caf50;font-size:0.65rem">(业务核心)</span></div>
+        <div class="layer-body">
+          UploadService — 分片上传编排（Init → Chunk → Complete）<br>
+          TranscodeService — 转码状态机（pending → processing → completed / failed）<br>
+          PlaybackService — 播放地址签发 + 权限校验<br>
+          ThumbnailService — 缩略图生成调度<br>
+          <span class="producer">➤ 生产 video:transcoded（转码结果事件）</span><br>
+          <span class="consumer">➤ 消费 video:transcode-task（待转码指令，FFmpeg Worker）</span>
+        </div>
+      </div>
+      <div class="layer repository">
+        <div class="layer-title">Repository 层 <span style="color:#ff8c42;font-size:0.65rem">(数据访问)</span></div>
+        <div class="layer-body">
+          GORM / sqlx — MySQL 操作<br>
+          go-redis — 上传会话、播放凭证、元数据缓存<br>
+          AWS SDK (S3) — 分片对象、HLS 文件读写<br>
+          <span style="color:#666">事务边界：CompleteUpload 在本地事务内更新视频状态</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右列：外部依赖 -->
+  <div class="svc-box">
+    <h3>外部依赖</h3>
+    <div class="dep-item"><span class="conn">gRPC ⟷</span> Gateway — 接收上传/播放/查询请求</div>
+    <div class="dep-item"><span class="conn async">Kafka ➤</span> video:transcoded（转码结果事件）</div>
+    <div class="dep-item"><span class="conn async">Kafka ⟵</span> video:transcode-task（待转码指令，FFmpeg Worker 消费）</div>
+    <div class="dep-item"><span class="conn">MySQL ⟷</span> video_db（独立库）</div>
+    <div class="dep-item"><span class="conn">Redis ⟷</span> 上传会话 / 播放凭证 / 元数据缓存</div>
+    <div class="dep-item"><span class="conn">S3 ⟷</span> 原始视频 + HLS 分片 + 缩略图</div>
+  </div>
+</div>
+
+<!-- ⭐ S3 存储流水线 + 分片上传 -->
+<div class="svc-box" style="border:2px solid #6c63ff;grid-column:1/-1">
+  <h3>⭐ 文件分片上传 & S3 存储流水线</h3>
+  <div class="pipeline">
+    <div class="pl-step">
+      <div class="num">1</div>
+      <div class="body"><strong>InitUpload：</strong>前端携带文件名/大小/类型 → 获取 S3 <span class="mono">Multipart Upload ID</span> → 创建上传会话 <span class="mono">upload:{upload_id}</span>（Redis Hash 存分片清单）→ 返回 upload_id + 已上传分片列表（断点续传）。<strong>InitUpload 阶段增加分布式锁</strong>（<span class="mono">upload:init:lock:{video_id}</span>），防止同一视频并行发起多次上传任务</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">2</div>
+      <div class="body"><strong>UploadChunk：</strong>前端按 <strong>5MB/片</strong> 上传 → <strong>分片直接上传至 S3</strong>（<span class="mono">UploadPart</span> 携带 partNumber）→ Redis 记录已上传分片 → 返回 <span class="ok">200 OK</span>（支持并发分片上传）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">3</div>
+      <div class="body"><strong>CompleteUpload：</strong>校验分片完整性（对比 Redis 清单）→ 调用 S3 <span class="mono">CompleteMultipartUpload</span> 完成合并（<strong>业务服务不执行文件拼接，由 S3 内部完成，降低服务器 IO 压力</strong>）→ 正式前缀 <span class="mono">raw/{video_id}.mp4</span> → 清理 tmp → 本地事务写 videos 表 → 生产 <span class="async">video:transcode-task</span></div>
+    </div>
+    <div class="pl-step">
+      <div class="num">4</div>
+      <div class="body"><strong>失败恢复 & 碎片清理：</strong>分片校验失败 → 返回缺失分片列表，前端只补传缺失片；<strong>超时未完成的分片（TTL 24h），由定时任务调用 <span class="mono">AbortMultipartUpload</span> 清理 S3 碎片文件</strong></div>
+    </div>
+  </div>
+</div>
+
+<!-- ⭐ FFmpeg 异步转码 + HLS -->
+<div class="svc-box" style="border:2px solid #ff8c42;grid-column:1/-1">
+  <h3>⭐ FFmpeg 异步转码（Kafka 任务队列）→ HLS 分片分发</h3>
+  <div class="pipeline">
+    <div class="pl-step">
+      <div class="num">1</div>
+      <div class="body"><strong>转码 Worker 组：</strong>消费 <span class="async">video:transcode-task</span>（待转码指令）→ <strong>先获取分布式锁</strong>（<span class="mono">video:transcode:lock:{id}</span> SETNX）<strong>避免 Kafka 重复消费重复转码</strong> → 从 S3 拉取原始文件到本地临时目录 → 状态置 <span class="ok">processing</span></div>
+    </div>
+    <div class="pl-step">
+      <div class="num">2</div>
+      <div class="body"><strong>FFmpeg 多码率转码：</strong>720p / 480p / 360p 三档 → 输出 <span class="mono">.m3u8</span> + <span class="mono">.ts</span> 分片（6s/片）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">3</div>
+      <div class="body"><strong>产物回传 S3：</strong>上传到 <span class="mono">hls/{video_id}/{quality}/*.m3u8 + *.ts</span> → 清理本地临时文件</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">4</div>
+      <div class="body"><strong>缩略图生成：</strong>FFmpeg 抽帧 <span class="mono">thumb/{video_id}.jpg</span>（首帧 + 中间帧）→ 写入 S3</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">5</div>
+      <div class="body"><strong>完成通知：</strong>更新状态 <span class="ok">completed</span> + HLS 地址 → 生产 <span class="async">video:transcoded</span>（转码结果事件）→ Notification Service 推送「转码完成」给发布者；<strong>失败</strong> → 状态 <span class="mono" style="color:#f44336">failed</span>，<strong>有限次数自动重试（上限 3 次），多次失败标记失败状态，支持人工重试</strong></div>
+    </div>
+    <div class="pl-step">
+      <div class="num">6</div>
+      <div class="body"><strong>HLS 分发：</strong>播放请求返回 <span class="mono">.m3u8</span> 主播放列表 URL → 浏览器 HLS.js 请求 <span class="mono">.ts</span> 分片 → 全部经 CDN 边缘缓存分发，Video Service 不直接承载视频流量</div>
+    </div>
+  </div>
+</div>
+
+<!-- ⭐ 播放权限 + 元数据缓存 -->
+<div class="svc-box" style="border:2px solid #4a9eff;grid-column:1/-1">
+  <h3>⭐ 播放权限 & 视频元数据缓存</h3>
+  <div class="pipeline">
+    <div class="pl-step">
+      <div class="num">1</div>
+      <div class="body"><strong>权限模型：</strong>视频三种可见性 — <span class="mono">public</span>（公开）/ <span class="mono">followers_only</span>（仅粉丝）/ <span class="mono">private</span>（仅自己）。GetPlaybackURL 校验：JWT 用户身份 + 视频 visibility + 关注关系（gRPC 调 User Service）</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">2</div>
+      <div class="body"><strong>播放凭证：</strong>权限通过 → 签发短期 <strong>签名播放 URL</strong>（<strong>时效签名 URL + Referer 限制，实现基础防盗链</strong>，S3 预签名 TTL 5min）→ Redis <span class="mono">playback:{video_id}:{user_id}</span> 记录已授权用户，<strong>权限缓存依靠 TTL 自动失效</strong>，无需手动清理</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">3</div>
+      <div class="body"><strong>分片防盗链：</strong>.ts 分片经 CDN 鉴权头校验（Referer + 时间戳签名），未授权请求返回 403，防止 HLS URL 泄露后任意盗播</div>
+    </div>
+    <div class="pl-step">
+      <div class="num">4</div>
+      <div class="body"><strong>元数据缓存：</strong><span class="mono">video:meta:{id}</span>（Hash：标题/封面/时长/码率列表/状态）TTL 30min · 转码完成后删除重建 · 列表页批量取 <span class="mono">MGET/HMGET</span> 减少回源</div>
+    </div>
+  </div>
+</div>
+
+<div class="svc-layout" style="grid-template-columns: 1fr 1fr">
+  <!-- 数据库表 -->
+  <div class="svc-box">
+    <h3>数据库表 (video_db)</h3>
+    <div class="table-item">
+      <span class="tname">videos</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · uploader_id <span class="tag-idx">IDX</span> · title · description · visibility · status <span class="tag-idx">IDX</span> · raw_key · hls_key · thumb_key · duration · created_at <span class="tag-idx">IDX</span></div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">status: pending → processing → completed / failed</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">uploads</span>
+      <div class="tcols"><span class="tag-pk">upload_id PK</span> · video_id · chunk_size · total_chunks · received_chunks · status · created_at</div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">📤 分片上传会话 · 断点续传依赖 · 与 Redis 清单配合</div>
+    </div>
+    <div class="table-item">
+      <span class="tname">transcode_tasks</span>
+      <div class="tcols"><span class="tag-pk">id PK</span> · video_id <span class="tag-fk">FK→videos.id</span> · quality · status <span class="tag-idx">IDX</span> · retry_count · error_msg · created_at</div>
+      <div style="font-size:0.65rem;color:#888;margin-top:0.25rem">🎞️ 转码任务记录 · 有限次数自动重试（上限 3 次）· 多次失败标记 failed 支持人工重试 · Kafka 任务与 DB 状态双记录</div>
+    </div>
+  </div>
+
+  <!-- Redis 缓存策略 -->
+  <div class="svc-box">
+    <h3>Redis 缓存策略</h3>
+    <div class="redis-item">
+      <span class="rkey">upload:{upload_id}</span><span class="rtype">Hash</span><span class="rtype ttl">TTL 24h</span>
+      <div style="color:#888;margin-top:0.2rem">上传会话 · 分片清单（bitmap/chunk list）· 断点续传 · 超时由定时任务清理 S3 碎片</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">upload:init:lock:{video_id}</span><span class="rtype">SETNX</span><span class="rtype ttl">TTL 1h</span>
+      <div style="color:#888;margin-top:0.2rem">InitUpload 分布式锁 · 防止同一视频并行发起多次上传任务</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">video:meta:{id}</span><span class="rtype">Hash</span><span class="rtype ttl">TTL 30min</span>
+      <div style="color:#888;margin-top:0.2rem">视频元数据缓存 · 转码完成后删除重建</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">playback:{video_id}:{user_id}</span><span class="rtype">String</span><span class="rtype ttl">TTL 5min</span>
+      <div style="color:#888;margin-top:0.2rem">播放授权凭证 · 与签名 URL 生命周期一致</div>
+    </div>
+    <div class="redis-item">
+      <span class="rkey">video:transcode:lock:{id}</span><span class="rtype">SETNX</span><span class="rtype ttl">TTL 30min</span>
+      <div style="color:#888;margin-top:0.2rem">转码任务去重锁 · 防止 Kafka 重复消费重复转码</div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="border-color:#ff8c42;margin-top:0.5rem">
+  <p style="font-size:0.8rem;color:#ccc"><strong>S3 对象布局：</strong></p>
+  <p style="font-size:0.72rem;color:#888;margin-top:0.3rem;font-family:monospace">
+    tmp/{upload_id}/part_{n} ← 上传临时分片（24h 清理）<br>
+    raw/{video_id}.mp4 ← 原始文件（完成后可选生命周期沉降）<br>
+    hls/{video_id}/{quality}/index.m3u8 + seg_{n}.ts ← HLS 分片（CDN 缓存）<br>
+    thumb/{video_id}.jpg ← 缩略图
+  </p>
+</div>
+
+<div class="status-bar" style="margin-top:1rem">
+  <span>⬆️ Video Service 是否符合预期？下一模块：Notification + ES Sync + Kafka 事件拓扑</span>
+</div>
