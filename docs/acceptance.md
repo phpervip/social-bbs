@@ -1,7 +1,7 @@
 # B 社交平台 · P1 验收记录
 
 > 阶段：**P1 — 发帖 → 首页时间线 端到端闭环**
-> 交付：远程 `https://github.com/phpervip/social-bbs`，`main` 与 `feat/p1-feed-loop` 两分支均指向 **`8ca6ae5`**（见 `P2-HANDOFF.md §1.1`）
+> 交付：远程 `https://github.com/phpervip/social-bbs`，`main` 与 `feat/p1-feed-loop` 两分支均指向 P1 收尾提交 **`f932220`**（含 docs/、CI、一键启动脚本与演示 GIF，见 `P2-HANDOFF.md §1.1`）
 > 本文档记录验收标准、验收证据与集成阶段踩坑清单。
 
 ## 1. 验收标准（4 条）
