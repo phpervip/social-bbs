@@ -28,6 +28,11 @@ type PostRow struct {
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
+// TableName pins the row to the frozen schema table "posts" (plan §3.1) —
+// GORM's default pluralization of "PostRow" would otherwise write to a
+// separate "post_rows" table while every read path uses Table("posts").
+func (PostRow) TableName() string { return "posts" }
+
 // PostLike is a like row; the composite PK makes INSERT IGNORE idempotent.
 type PostLike struct {
 	PostID    int64     `gorm:"primaryKey"`

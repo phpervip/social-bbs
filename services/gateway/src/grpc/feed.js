@@ -22,9 +22,12 @@ const PROTO_OPTIONS = {
   oneofs: true,
 };
 
+// deadline must be computed per call (not at module load) — a module-level
+// constant would expire while the gateway is running and every first gRPC
+// call would fail with DEADLINE_EXCEEDED ("waiting for name resolution").
 const DEFAULT_CALL_OPTIONS = {
   // waitForReady retries while the server is unavailable; deadline caps one attempt.
-  deadline: Date.now() + 5000,
+  deadline: () => Date.now() + 5000,
   waitForReady: true,
 };
 
@@ -64,7 +67,7 @@ function createFeedClient({ address = 'localhost:9000', grpcService = loadDefini
       const invoke = () =>
         new Promise((resolve, reject) => {
           const c = getClient();
-          const deadline = callOptions.deadline || DEFAULT_CALL_OPTIONS.deadline;
+          const deadline = callOptions.deadline || DEFAULT_CALL_OPTIONS.deadline();
           const waitForReady = callOptions.waitForReady !== undefined ? callOptions.waitForReady : DEFAULT_CALL_OPTIONS.waitForReady;
           const handler = (err, response) => {
             if (err) {

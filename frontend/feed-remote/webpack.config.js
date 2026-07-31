@@ -8,10 +8,15 @@ const { ModuleFederationPlugin } = require('webpack').container;
  */
 module.exports = {
   name: 'feed',
-  // The entry chunk carries the Module Federation container and MUST be
-  // emitted as remoteEntry.js — that's the URL the Shell host fetches.
-  entry: { remoteEntry: './src/index.js' },
+  // Standard MF remote: plain entry — the ModuleFederationPlugin rewrites the
+  // entry chunk and emits it as remoteEntry.js WITH the container object
+  // (window.feed = {get, init}) inside. Explicitly naming the entry
+  // ({ remoteEntry: './src/index.js' }) would instead emit a bare runtime
+  // remoteEntry.js and push the container into a separate feed.js chunk the
+  // host never loads — "window.feed is undefined".
+  entry: './src/index.js',
   output: {
+    filename: '[name].js',
     publicPath: 'auto',
     clean: true,
   },
@@ -51,6 +56,10 @@ module.exports = {
   plugins: [
     new ModuleFederationPlugin({
       name: 'feed',
+      // MUST be explicit: the Shell host fetches `feed@http://localhost:3001/remoteEntry.js`
+      // (shell webpack.config.js remotes). Without this, the container chunk is
+      // emitted as `feed.js` and remoteEntry.js 404s -> "window.feed is undefined".
+      filename: 'remoteEntry.js',
       exposes: {
         './HomeTimeline': './src/HomeTimeline.jsx',
         './PostDetail': './src/PostDetail.jsx',

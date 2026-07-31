@@ -49,10 +49,13 @@ module.exports = (env, argv) => {
           feed: 'feed@http://localhost:3001/remoteEntry.js',
         },
         shared: {
-          react: { singleton: true, requiredVersion: false },
-          'react-dom': { singleton: true, requiredVersion: false },
-          'react-router-dom': { singleton: true, requiredVersion: false },
-          axios: { singleton: true },
+          // Host-provided deps must be eager so async-consumed remotes (and the
+          // host's own async bootstrap chunk) never hit "Shared module is not
+          // available for eager consumption".
+          react: { singleton: true, requiredVersion: false, eager: true },
+          'react-dom': { singleton: true, requiredVersion: false, eager: true },
+          'react-router-dom': { singleton: true, requiredVersion: false, eager: true },
+          axios: { singleton: true, eager: true },
           // App-level shared module — THE CONTRACT. Remotes import { api, bus, ui } from this.
           '@b/shared': { import: './src/shared', singleton: true, eager: true },
         },
