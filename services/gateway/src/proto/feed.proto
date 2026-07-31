@@ -1,0 +1,114 @@
+// Feed Service gRPC contract (P1 — frozen. Gateway & Feed Service generate stubs from this file.)
+syntax = "proto3";
+
+package feed.v1;
+
+option go_package = "social-bbs/feed-service/proto/gen;feedpb";
+
+message Post {
+  int64 id = 1;
+  int64 user_id = 2;
+  string username = 3;
+  string display_name = 4;
+  string avatar_url = 5;
+  string content = 6;
+  string media_url = 7;
+  int64 like_count = 8;
+  int64 comment_count = 9;
+  bool liked_by_viewer = 10;
+  int64 created_at = 11; // unix ms
+}
+
+message Comment {
+  int64 id = 1;
+  int64 post_id = 2;
+  int64 user_id = 3;
+  string username = 4;
+  string display_name = 5;
+  string avatar_url = 6;
+  string content = 7;
+  int64 created_at = 8; // unix ms
+}
+
+// Shared cursor pagination for timeline / comments / search.
+// cursor = last returned created_at (unix ms); 0 = first page (newest first).
+message CursorPage {
+  int64 cursor = 1;
+  int32 limit = 2; // default 20, max 50
+}
+
+message CreatePostRequest {
+  int64 user_id = 1;
+  string content = 2;
+  string media_url = 3;
+}
+
+message GetPostRequest {
+  int64 id = 1;
+  int64 viewer_id = 2;
+}
+
+message GetHomeTimelineRequest {
+  int64 user_id = 1;
+  CursorPage page = 2;
+}
+
+message TimelineResponse {
+  repeated Post posts = 1;
+  int64 next_cursor = 2;
+  bool has_more = 3;
+}
+
+// Only the author may delete; otherwise PERMISSION_DENIED.
+message DeletePostRequest {
+  int64 id = 1;
+  int64 user_id = 2;
+}
+
+message LikeRequest {
+  int64 user_id = 1;
+  int64 post_id = 2;
+}
+
+message CommentRequest {
+  int64 post_id = 1;
+  int64 user_id = 2;
+  string content = 3;
+}
+
+message GetCommentsRequest {
+  int64 post_id = 1;
+  CursorPage page = 2;
+}
+
+message CommentsResponse {
+  repeated Comment comments = 1;
+  int64 next_cursor = 2;
+  bool has_more = 3;
+}
+
+message SearchRequest {
+  string query = 1;
+  int64 user_id = 2;
+  CursorPage page = 3;
+}
+
+message SearchResponse {
+  repeated Post posts = 1;
+  int64 next_cursor = 2;
+  bool has_more = 3;
+}
+
+message Empty {}
+
+service FeedService {
+  rpc CreatePost(CreatePostRequest) returns (Post);
+  rpc GetPost(GetPostRequest) returns (Post);
+  rpc GetHomeTimeline(GetHomeTimelineRequest) returns (TimelineResponse);
+  rpc DeletePost(DeletePostRequest) returns (Empty);
+  rpc LikePost(LikeRequest) returns (Empty);
+  rpc UnlikePost(LikeRequest) returns (Empty);
+  rpc AddComment(CommentRequest) returns (Comment);
+  rpc GetComments(GetCommentsRequest) returns (CommentsResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
