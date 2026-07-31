@@ -1,0 +1,95 @@
+# CI — B (social-bbs) 微服务演示项目
+#
+# 触发：push（任意分支）+ pull_request
+# 三个独立 job（无依赖，可并行）：
+#   - feed-service : Go vet + build + test（services/feed-service，module social-bbs/feed-service）
+#   - gateway      : npm ci + npm test（services/gateway，node --test）
+#   - frontend     : matrix 跑 shell 与 feed-remote 的 npm ci + npm run build（webpack production）
+#
+# 前端构建独立性说明：shell 的 ModuleFederation remotes 指向
+# `feed@http://localhost:3001/remoteEntry.js`（运行时 URL，构建期不抓取）；
+# feed-remote 消费宿主提供的 `@b/shared`（import: false，运行期解析）。
+# 因此两个前端目录彼此无构建期依赖，各自独立 npm ci / npm run build 即可。
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  feed-service:
+    name: Feed Service (Go vet/build/test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/feed-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: services/feed-service/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./...
+
+  gateway:
+    name: Gateway (npm test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/gateway/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: npm test
+        run: npm test
+
+  frontend:
+    name: Frontend build (${{ matrix.app.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - name: shell
+            dir: frontend/shell
+          - name: feed-remote
+            dir: frontend/feed-remote
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ matrix.app.dir }}/package-lock.json
+
+      - name: npm ci (${{ matrix.app.name }})
+        run: npm ci
+        working-directory: ${{ matrix.app.dir }}
+
+      - name: npm run build (${{ matrix.app.name }})
+        run: npm run build
+        working-directory: ${{ matrix.app.dir }}
