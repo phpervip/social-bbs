@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, ui } from '@b/shared';
 import PostCard from './PostCard.jsx';
 import { formatRelativeTime } from './format.js';
+import './styles.css'; // required — component styles must travel with the lazy MF chunk
 
 const COMMENT_MAX = 500;
 

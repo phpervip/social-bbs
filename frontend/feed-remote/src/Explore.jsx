@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, ui } from '@b/shared';
 import PostCard from './PostCard.jsx';
+import './styles.css'; // required — component styles must travel with the lazy MF chunk
 
 const PAGE_SIZE = 20;
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, bus, ui } from '@b/shared';
 import PostCard from './PostCard.jsx';
+import './styles.css'; // required — component styles must travel with the lazy MF chunk
 
 const PAGE_SIZE = 20;
 const MAX_CHARS = 280;
