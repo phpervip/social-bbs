@@ -6,6 +6,7 @@
 
 - Docker Desktop 已启动（`docker info` 可正常输出）
 - 端口 3306 / 6379 未被占用
+- Node.js 18+ / Go 1.22+（本机实测 Go 1.26.5）。若 `go` 不在 PATH（如仅存在于 `C:\Program Files\Go\bin\go.exe`），请在启动 Feed Service 前手动加入 PATH 或用完整路径调用。
 
 ## 快速开始
 
