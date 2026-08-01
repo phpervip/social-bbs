@@ -34,6 +34,10 @@ function createRedis({ addr = 'localhost:6379', password = '' } = {}) {
     async expire(key, seconds) {
       return getClient().expire(key, seconds);
     },
+    // Used by the auth middleware for the JWT blacklist read (auth:blacklist:{jti}).
+    async get(key) {
+      return getClient().get(key);
+    },
     close() {
       if (client) client.disconnect();
       client = null;

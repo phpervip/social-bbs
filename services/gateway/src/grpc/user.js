@@ -1,10 +1,9 @@
 'use strict';
 
-// gRPC client factory for the FeedService (proto: src/proto/feed.proto).
-// Lazy connect: the channel is created on first use (so the gateway boots
-// even when the Feed Service is down) and every call waits for the channel
-// to become ready with retry (waitForReady), so transient outages recover
-// without a gateway restart.
+// gRPC client factory for the UserService (proto: src/proto/user.proto).
+// Mirrors grpc/feed.js: lazy connect (gateway boots even when the User
+// Service is down), waitForReady retry per call, breaker-wrapped dispatch,
+// and DEADLINE_EXCEEDED connectivity errors normalized to UNAVAILABLE.
 // R3: calls made on behalf of an authenticated user also carry the
 // x-user-id / x-user-name identity metadata headers.
 
@@ -14,11 +13,11 @@ const protoLoader = require('@grpc/proto-loader');
 const { runWithBreaker } = require('../middleware/breaker');
 const { GRPC_STATUS_CODE } = require('../middleware/grpcCodes');
 
-const PROTO_PATH = path.join(__dirname, '..', 'proto', 'feed.proto');
+const PROTO_PATH = path.join(__dirname, '..', 'proto', 'user.proto');
 
 const PROTO_OPTIONS = {
   keepCase: true,
-  longs: Number, // int64 fields arrive as JS numbers (safe for P1 timestamps)
+  longs: Number, // int64 fields arrive as JS numbers (safe for P2 ids/timestamps)
   enums: String,
   defaults: true,
   oneofs: true,
@@ -38,7 +37,7 @@ const DEFAULT_CALL_OPTIONS = {
 // is a service-unavailable condition, not a deadline the caller cares about.
 function normalizeConnectivityError(err) {
   if (err && err.code === GRPC_STATUS_CODE.DEADLINE_EXCEEDED) {
-    const normalized = new Error(err.details || 'feed service unavailable');
+    const normalized = new Error(err.details || 'user service unavailable');
     normalized.code = GRPC_STATUS_CODE.UNAVAILABLE;
     return normalized;
   }
@@ -48,11 +47,11 @@ function normalizeConnectivityError(err) {
 function loadDefinition() {
   const packageDefinition = protoLoader.loadSync(PROTO_PATH, PROTO_OPTIONS);
   const loaded = grpc.loadPackageDefinition(packageDefinition);
-  return loaded.feed.v1.FeedService;
+  return loaded.user.v1.UserService;
 }
 
 // grpcService is injectable for tests (a stub exposing the same method names).
-function createFeedClient({ address = 'localhost:9000', grpcService = loadDefinition(), breaker, logger } = {}) {
+function createUserClient({ address = 'localhost:9001', grpcService = loadDefinition(), breaker, logger } = {}) {
   let channel = null;
   let client = null;
 
@@ -97,15 +96,15 @@ function createFeedClient({ address = 'localhost:9000', grpcService = loadDefini
   }
 
   const METHODS = [
-    'createPost',
-    'getPost',
-    'getHomeTimeline',
-    'deletePost',
-    'likePost',
-    'unlikePost',
-    'addComment',
-    'getComments',
-    'search',
+    'register',
+    'login',
+    'logout',
+    'getProfile',
+    'updateProfile',
+    'follow',
+    'unfollow',
+    'getFollowers',
+    'getFollowing',
   ];
 
   const api = {};
@@ -123,4 +122,4 @@ function createFeedClient({ address = 'localhost:9000', grpcService = loadDefini
   return api;
 }
 
-module.exports = { createFeedClient, loadDefinition, PROTO_PATH };
+module.exports = { createUserClient, loadDefinition, PROTO_PATH };

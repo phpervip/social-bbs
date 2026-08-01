@@ -14,11 +14,20 @@ const PUBLISH_ENDPOINTS = new Set([
   'POST /api/feed/comment',
 ]);
 
+// Follow endpoints also publish (10r/min) but the user id is a dynamic path
+// segment, so exact-match keys don't apply — match the path shape instead.
+const PUBLISH_PATH_PATTERNS = [
+  { method: 'POST', pattern: /^\/api\/user\/\d+\/follow$/ },
+  { method: 'DELETE', pattern: /^\/api\/user\/\d+\/follow$/ },
+];
+
 // Pure function — decides which tier applies to a request. Export for tests.
 function rateTierFor({ method, url, isAuthed }) {
   const path = url.split('?')[0];
-  if (isAuthed && PUBLISH_ENDPOINTS.has(`${method} ${path}`)) return 'publish';
-  return isAuthed ? 'authed' : 'anon';
+  if (!isAuthed) return 'anon';
+  if (PUBLISH_ENDPOINTS.has(`${method} ${path}`)) return 'publish';
+  if (PUBLISH_PATH_PATTERNS.some((p) => p.method === method && p.pattern.test(path))) return 'publish';
+  return 'authed';
 }
 
 const TIER_LIMITS = {
@@ -65,4 +74,4 @@ function createRateMiddleware({ client, limits = TIER_LIMITS }) {
   };
 }
 
-module.exports = { createRateMiddleware, rateTierFor, TIER_LIMITS, WINDOW_SECONDS, PUBLISH_ENDPOINTS };
+module.exports = { createRateMiddleware, rateTierFor, TIER_LIMITS, WINDOW_SECONDS, PUBLISH_ENDPOINTS, PUBLISH_PATH_PATTERNS };
