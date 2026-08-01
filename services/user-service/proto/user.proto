@@ -1,0 +1,47 @@
+// User Service gRPC contract (P2 frozen. Gateway & User Service generate stubs from this file.)
+syntax = "proto3";
+
+package user.v1;
+
+option go_package = "social-bbs/user-service/proto/gen;userpb";
+
+service UserService {
+  rpc Register(RegisterRequest) returns (AuthResponse);
+  rpc Login(LoginRequest) returns (AuthResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  rpc Follow(FollowRequest) returns (FollowResponse);
+  rpc Unfollow(UnfollowRequest) returns (UnfollowResponse);
+  rpc GetFollowers(GetFollowersRequest) returns (FollowListResponse);
+  rpc GetFollowing(GetFollowingRequest) returns (FollowListResponse);
+}
+
+message User {
+  int64 id = 1;
+  string username = 2;
+  string display_name = 3;
+  string email = 4;
+  string bio = 5;
+  string avatar_url = 6;
+  int64 follower_count = 7;
+  int64 following_count = 8;
+  int64 created_at = 9; // unix ms
+}
+
+message RegisterRequest { string username = 1; string email = 2; string password = 3; string display_name = 4; }
+message LoginRequest { string account = 1; string password = 2; } // account = username or email
+message AuthResponse { string token = 1; int64 expires_in = 2; User user = 3; }
+message LogoutRequest { string jti = 1; }
+message LogoutResponse {}
+message GetProfileRequest { int64 user_id = 1; }
+message GetProfileResponse { User user = 1; }
+message UpdateProfileRequest { int64 user_id = 1; string display_name = 2; string bio = 3; string avatar_url = 4; }
+message UpdateProfileResponse { User user = 1; }
+message FollowRequest { int64 follower_id = 1; int64 followee_id = 2; }
+message FollowResponse {}
+message UnfollowRequest { int64 follower_id = 1; int64 followee_id = 2; }
+message UnfollowResponse {}
+message GetFollowersRequest { int64 user_id = 1; int64 cursor = 2; int32 limit = 3; }
+message GetFollowingRequest { int64 user_id = 1; int64 cursor = 2; int32 limit = 3; }
+message FollowListResponse { repeated User users = 1; int64 next_cursor = 2; bool has_more = 3; }
