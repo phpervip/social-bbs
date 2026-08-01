@@ -9,6 +9,14 @@ spring:
       mode: always
       schema-locations: classpath:schema.sql
 
+grpc:
+  server:
+    port: 0 # ephemeral port per test context, avoids conflicts
+
+app:
+  scheduling:
+    enabled: false
+
 jwt:
   secret: test-secret
   ttl-seconds: 86400

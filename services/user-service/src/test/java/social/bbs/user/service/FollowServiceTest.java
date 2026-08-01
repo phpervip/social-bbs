@@ -26,10 +26,10 @@ class FollowServiceTest {
     void follow_duplicate_isIdempotent() {
         User alice = authService.register(RegisterRequest.newBuilder()
                 .setUsername("alice").setEmail("alice@example.com")
-                .setPassword("Password123!").setDisplayName("Alice").build());
+                .setPassword("Password123!").setDisplayName("Alice").build()).getUser();
         User bob = authService.register(RegisterRequest.newBuilder()
                 .setUsername("bob").setEmail("bob@example.com")
-                .setPassword("Password123!").setDisplayName("Bob").build());
+                .setPassword("Password123!").setDisplayName("Bob").build()).getUser();
 
         FollowRequest req = FollowRequest.newBuilder()
                 .setFollowerId(alice.getId())
@@ -52,10 +52,10 @@ class FollowServiceTest {
     void unfollow_notFollowing_isNoop() {
         User alice = authService.register(RegisterRequest.newBuilder()
                 .setUsername("alice2").setEmail("alice2@example.com")
-                .setPassword("Password123!").setDisplayName("Alice2").build());
+                .setPassword("Password123!").setDisplayName("Alice2").build()).getUser();
         User bob = authService.register(RegisterRequest.newBuilder()
                 .setUsername("bob2").setEmail("bob2@example.com")
-                .setPassword("Password123!").setDisplayName("Bob2").build());
+                .setPassword("Password123!").setDisplayName("Bob2").build()).getUser();
 
         UnfollowRequest req = UnfollowRequest.newBuilder()
                 .setFollowerId(alice.getId())
@@ -73,7 +73,7 @@ class FollowServiceTest {
     void follow_self_rejected() {
         User alice = authService.register(RegisterRequest.newBuilder()
                 .setUsername("alice3").setEmail("alice3@example.com")
-                .setPassword("Password123!").setDisplayName("Alice3").build());
+                .setPassword("Password123!").setDisplayName("Alice3").build()).getUser();
 
         FollowRequest req = FollowRequest.newBuilder()
                 .setFollowerId(alice.getId())

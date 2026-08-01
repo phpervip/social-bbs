@@ -1,9 +1,9 @@
 package social.bbs.user.service;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import social.bbs.user.entity.UserOutboxEntity;
@@ -11,6 +11,7 @@ import social.bbs.user.mapper.UserOutboxMapper;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -52,6 +53,43 @@ public class UserOutboxService {
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
         outboxMapper.insert(entity);
+    }
+
+    public List<UserOutboxEntity> claimPending(int limit) {
+        return outboxMapper.selectList(Wrappers.<UserOutboxEntity>lambdaQuery()
+                .eq(UserOutboxEntity::getStatus, "pending")
+                .orderByAsc(UserOutboxEntity::getId)
+                .last("LIMIT " + limit));
+    }
+
+    @Transactional
+    public void markDelivered(Long id) {
+        updateStatus(id, "delivered");
+    }
+
+    @Transactional
+    public int incrementRetry(Long id) {
+        UserOutboxEntity entity = outboxMapper.selectById(id);
+        if (entity == null) {
+            return 0;
+        }
+        entity.setRetryCount(entity.getRetryCount() + 1);
+        entity.setUpdatedAt(Instant.now().toEpochMilli());
+        outboxMapper.updateById(entity);
+        return entity.getRetryCount();
+    }
+
+    @Transactional
+    public void markFailed(Long id) {
+        updateStatus(id, "failed");
+    }
+
+    private void updateStatus(Long id, String status) {
+        UserOutboxEntity entity = new UserOutboxEntity();
+        entity.setId(id);
+        entity.setStatus(status);
+        entity.setUpdatedAt(Instant.now().toEpochMilli());
+        outboxMapper.updateById(entity);
     }
 
     @SneakyThrows

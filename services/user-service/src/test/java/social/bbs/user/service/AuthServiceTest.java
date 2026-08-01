@@ -87,7 +87,7 @@ class AuthServiceTest {
                 .setEmail("dave@example.com")
                 .setPassword("Password123!")
                 .setDisplayName("Dave")
-                .build());
+                .build()).getUser();
 
         AuthResponse resp = authService.login(LoginRequest.newBuilder()
                 .setAccount("dave")
