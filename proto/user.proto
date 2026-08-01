@@ -1,9 +1,11 @@
 // User Service gRPC contract (P2 frozen. Gateway & User Service generate stubs from this file.)
 syntax = "proto3";
-
 package user.v1;
 
 option go_package = "social-bbs/user-service/proto/gen;userpb";
+option java_multiple_files = true;
+option java_package = "user.v1";
+
 
 service UserService {
   rpc Register(RegisterRequest) returns (AuthResponse);
