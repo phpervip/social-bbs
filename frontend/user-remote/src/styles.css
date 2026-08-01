@@ -1,0 +1,272 @@
+/* ============================================================
+   User Remote — local styles only.
+   Colors come EXCLUSIVELY from Shell's CSS variables (design
+   tokens: --brand #8B5A2B 咖啡棕, black/white neutral base).
+   极简：卡片无边框，--bg-secondary + 圆角 + 留白。
+   Hover 仅 150ms 颜色/背景过渡。
+   ============================================================ */
+
+/* ---------- Auth（登录/注册卡片） ---------- */
+
+.user-auth {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.user-auth-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 32px 32px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  animation: user-rise 150ms ease;
+}
+
+.user-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  user-select: none;
+}
+
+.user-auth-title {
+  margin: 14px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.user-auth-sub {
+  margin: 2px 0 20px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* 分段式双 Tab（登录 / 注册） */
+.user-tabs {
+  display: flex;
+  width: 100%;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 20px;
+  background: var(--bg);
+  border-radius: 999px;
+}
+
+.user-tab {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.user-tab:hover {
+  color: var(--brand);
+}
+
+.user-tab.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.user-auth-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-input {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--text);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.user-input::placeholder {
+  color: var(--text-2);
+}
+
+.user-input:focus {
+  border-color: var(--brand-2);
+}
+
+.user-btn-block {
+  width: 100%;
+  margin-top: 6px;
+}
+
+/* ---------- Profile（个人主页） ---------- */
+
+.user-profile-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 16px;
+  margin-bottom: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  transition: background-color 150ms ease;
+}
+
+.user-profile-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-profile-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.user-profile-username {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.user-profile-bio {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user-profile-follow {
+  flex-shrink: 0;
+}
+
+.user-stats {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.user-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.user-stat strong {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  transition: color 150ms ease;
+}
+
+.user-stat:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.user-stat:hover strong {
+  color: var(--brand);
+}
+
+.user-stat.active {
+  color: var(--brand);
+}
+
+.user-stat.active strong {
+  color: var(--brand);
+}
+
+/* ---------- 粉丝 / 关注列表 ---------- */
+
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  transition: background-color 150ms ease;
+}
+
+.user-row:hover {
+  background: var(--bg);
+}
+
+.user-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-row-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.user-row-username {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.user-loading-more {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* ---------- animations ---------- */
+@keyframes user-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
