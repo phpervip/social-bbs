@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, ui } from '@b/shared';
 import { formatRelativeTime } from './format.js';
 import { getCurrentUserId } from './currentUser.js';
@@ -66,11 +66,15 @@ export default function PostCard({ post, onDeleted }) {
 
   return (
     <article className="feed-card">
-      <ui.Avatar src={post.avatar_url || undefined} name={post.display_name || post.username} size={48} />
+      <Link className="feed-card-author-link" to={`/profile/${post.user_id}`}>
+        <ui.Avatar src={post.avatar_url || undefined} name={post.display_name || post.username} size={48} />
+      </Link>
       <div className="feed-card-main">
         <div className="feed-card-head">
-          <span className="feed-card-name">{post.display_name || post.username}</span>
-          <span className="feed-card-username">@{post.username}</span>
+          <Link className="feed-card-author-link" to={`/profile/${post.user_id}`}>
+            <span className="feed-card-name">{post.display_name || post.username}</span>
+            <span className="feed-card-username">@{post.username}</span>
+          </Link>
           <span className="feed-card-time">· {formatRelativeTime(post.created_at)}</span>
         </div>
         <p className="feed-card-content">{post.content}</p>

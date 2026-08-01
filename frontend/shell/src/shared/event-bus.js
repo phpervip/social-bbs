@@ -7,6 +7,7 @@ export const EVENTS = Object.freeze({
   AUTH_LOGIN: 'auth:login',
   AUTH_LOGOUT: 'auth:logout',
   POST_CREATED: 'post:created',
+  PROFILE_UPDATED: 'profile:updated',
 });
 
 const listeners = new Map();
