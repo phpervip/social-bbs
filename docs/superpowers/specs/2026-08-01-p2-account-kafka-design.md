@@ -18,7 +18,7 @@ P1「发帖 → 首页时间线」已端到端交付。P2 完成两件大事：
 **范围边界**（P2 不做）：
 - 不迁移 Kind/K8s（D1 留 P2+）
 - 不做大 V Pull 模式（阈值 stub 保留，P4 启用）
-- 不消费 `user:registered` 事件（新用户懒重建已覆盖）
+- 不消费 `user.registered` 事件（新用户懒重建已覆盖）
 - 个人主页不做帖子列表（feed.proto 冻结，需新 RPC，留 P4）
 - 不做点赞精确计数校准 / ES 搜索（D6/D7 留 P4）
 
@@ -58,11 +58,13 @@ P1「发帖 → 首页时间线」已端到端交付。P2 完成两件大事：
 
 ### 3.2 事件拓扑（P2 定稿）
 
+> **Kafka topic 命名规范（R6，全服务统一）**：小写 `snake_case` + `.` 分隔（如 `post.created`），禁止 `:`/`-` 做分隔符（Kafka 客户端工具链对 `.` 兼容性最好）。所有 P2 服务遵守此规范。
+
 | topic | 生产方 | 消费方/组 | P2 动作 |
 |---|---|---|---|
-| `post:created` | Feed（outbox→Kafka） | Feed 自身 fanout 组 `feed-fanout` | 真实粉丝写扩散 |
-| `user:follow-changed` | User Service | Feed timeline 组 `feed-timeline` | 关注回填 / 取关清理 |
-| `user:registered` | User Service | —（P2 不消费） | 只生产，懒重建覆盖 |
+| `post.created` | Feed（outbox→Kafka） | Feed 自身 fanout 组 `feed-fanout` | 真实粉丝写扩散 |
+| `user.follow-changed` | User Service | Feed timeline 组 `feed-timeline` | 关注回填 / 取关清理 |
+| `user.registered` | User Service | —（P2 不消费） | 只生产，懒重建覆盖 |
 
 ---
 
@@ -99,13 +101,17 @@ P1「发帖 → 首页时间线」已端到端交付。P2 完成两件大事：
 users:        id PK · username VARCHAR(64) UNIQUE · email VARCHAR(255) UNIQUE
               · password_hash VARCHAR(100) · bio VARCHAR(255) DEFAULT ''
               · avatar_url VARCHAR(255) DEFAULT '' · follower_count INT DEFAULT 0
-              · following_count INT DEFAULT 0 · created_at DATETIME(3) · updated_at DATETIME(3)
+              · following_count INT DEFAULT 0
+              · status TINYINT NOT NULL DEFAULT 1   -- 预留账号状态：1=正常 0=封禁（本期不实现封禁流程，仅预留字段）
+              · created_at DATETIME(3) · updated_at DATETIME(3)
 follows:      follower_id BIGINT + followee_id BIGINT 联合 PK · FK→users.id
               · created_at DATETIME(3)   -- 联合唯一 → 关注天然幂等
+              -- 限制（本期接受）：不启用软删除；取关即物理 DELETE 该行，无历史关注轨迹
 user_sessions: token_id VARCHAR(64) PK(=JWT jti) · user_id BIGINT · expires_at DATETIME(3)
               · revoked TINYINT(1) DEFAULT 0   -- 多端登录 / 主动下线
 ```
 
+- **鉴权双重兜底**：`user_sessions.revoked`（DB 权威态）+ `auth:blacklist:{jti}`（Redis 快速校验）双写；登出时 DB 置 revoked=1 且 Redis 写入黑名单（TTL=JWT 剩余）。鉴权判失效以 **DB revoked 为最终依据**，Redis 黑名单为 Gateway 热路径快速拦截（可短暂不一致，DB 兜底保证最终一致）。
 - 种子用户（迁移自 feed_db 种子，密码统一 BCrypt(`Password123!`)）：bob / alice / carol / dave
 - 演示环境物理外键；注释注明生产移除
 
@@ -118,21 +124,40 @@ user_sessions: token_id VARCHAR(64) PK(=JWT jti) · user_id BIGINT · expires_at
 | `user:following:{id}` | ZSet | 5min | 关注列表；ZRange 分页 |
 | `auth:blacklist:{jti}` | String | = JWT 剩余有效期 | 登出黑名单；与 Gateway 共享 |
 
-缓存一致性：**更新数据库 → 删除缓存**，TTL 兜底。
+缓存一致性：**更新数据库 → 主动删除相关缓存**，TTL 兜底（写后即删，不更新缓存）。
+- **R5（关注关系变更主动清理）**：Follow/Unfollow 落库后，**主动 DEL** `user:followers:{followee_id}` 与 `user:following:{follower_id}` 两个 ZSet 缓存（先删再等 miss 回填），将脏数据窗口从「TTL 5min」缩短为「下一次读 miss」；profile 缓存同理在资料更新后 DEL。事件投递成功后再触发一次 DEL 作为对账（幂等无害）。
 
-### 4.5 关注流程（事务 + 事件）
+### 4.5 关注流程（事务 + outbox 事件）
+
+**全服务统一 Outbox 模式**（R1 修正）：User Service 的事件生产不再采用单纯 `@TransactionalEventListener(AFTER_COMMIT)` 直发 Kafka，而是**事务内写本地 outbox 表 → 异步投递 → 定时重试兜底**，与 Feed 侧 `post.created` 的 outbox 投递（§5.2）完全同一套模式，保证消息可靠送达。
 
 ```
-FollowService: tx { 写 follows + 更新 follower_count/following_count } → COMMIT
-→ @TransactionalEventListener(AFTER_COMMIT) → 更新 Redis ZSet → 发 Kafka user:follow-changed
-→ 失败 → 本地消息表（user_outbox）兜底补偿重发
+FollowService: tx { 写 follows + 更新 follower_count/following_count
+                  + INSERT user_outbox(status='pending', topic='user.follow-changed', payload) } → COMMIT
+→ Dispatcher（常驻 goroutine/线程）扫描 pending → Kafka 发布 user.follow-changed → 成功置 delivered
+→ 失败 retry_count+1，≥3 → failed；Compensation（定时 5s）重投超时 pending / failed（上限 3）
+→ 事件送达后：更新 Redis followers/following ZSet（或 DEL 让读时回填）→ 主动清理相关缓存键
 ```
+
+- User Service 侧 outbox 表结构仿 Feed `outbox_events`（id / topic / payload JSON / status / retry_count / created_at / updated_at）
+- Redis ZSet 更新与 Kafka 投递解耦：以 outbox 送达为准；ZSet 缺失由 5min TTL + 读时回填兜底
+- `user.registered` 事件同样走 outbox 表，本期无消费者，投递后置 delivered 即可
 
 ### 4.6 密码与 JWT
 
 - 密码：BCrypt（`BCryptPasswordEncoder`，strength 10）
 - JWT：HS256 签发，payload `{sub: String(user_id), username, displayName, jti, iat, exp}`；`jti` = UUID，同步写 `user_sessions`
 - 登录/注册成功返回 `{token, expires_in, user:{...}}`
+- **安全风险备注**：HS256 为对称签名，`JWT_SECRET` 由 Gateway 与 User Service 共享——一旦密钥泄露，两服务均可伪造/校验 token。本期接受（开发/演示环境），**远期规划升级 RSA 非对称**：User Service 持私钥签发，Gateway 仅持公钥验签，消除共享密钥单点风险（升级点：`JwtUtil` 换 `SignatureAlgorithm.RS256`，Gateway 侧换公钥验签，payload 不变）。
+- **透传而非下游验签**：Gateway 校验 JWT 通过后，向下游服务透传 **`X-User-ID`**（以及 username），下游（Feed/User Service）**不再自行验签**，直接信任 Gateway 注入的请求身份——减少下游重复验签成本与密钥暴露面。
+
+**R2（HS256 共享密钥安全风险备注）**：
+- 已知风险：`JWT_SECRET` 为 Gateway 与 User Service **共享的对称密钥**——① 单点：一处泄漏全系统可伪造 token；② 轮换困难：换密钥即全量失效，需灰度双密钥；③ 仅适用内网微服务信任域（本演示项目尺度可接受）。
+- **远期规划（P3+）**：升级 **RSA 非对称**——User Service 持私钥签发，Gateway 仅持公钥验签；`JWT_SECRET` 替换为 `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`，`jti`/session 模型不变。本期实现时在 `JwtProperties` 预留算法切换位（`HS256` 默认，`RS256` 常量预留）。
+
+**R8（user_sessions 与 Redis 黑名单双重兜底）**：
+- 登出写两处：① `UPDATE user_sessions SET revoked=1`（**数据库持久兜底**：审计、Redis 丢失/重启后可回源）② `Redis SETEX auth:blacklist:{jti}`（**读路径快检**，TTL = JWT 剩余有效期）。
+- 鉴权判定：Gateway 以 Redis 黑名单为准（快路径）；Redis 不可用或条目丢失时，User Service 侧可回源 `user_sessions.revoked` 校验兜底（本期 Gateway 单查 Redis，User Service 保留回源能力）。
 
 ---
 
@@ -140,14 +165,14 @@ FollowService: tx { 写 follows + 更新 follower_count/following_count } → CO
 
 ### 5.1 CreatePost 事务改造
 
-- `internal/service/post_service.go`：`posts.Create` 的 tx 内**同时插入 outbox_events**（`topic=post:created`，payload `{post_id, user_id, content, created_at}`，`status='pending'`）
+- `internal/service/post_service.go`：`posts.Create` 的 tx 内**同时插入 outbox_events**（`topic=post.created`，payload `{post_id, user_id, content, created_at}`，`status='pending'`）
 - **移除** `fanout.Enqueue` 调用（fanout.go 进程内 channel 消费者 → 改为 Kafka 消费者）
 
 ### 5.2 outbox 投递双 worker（`internal/worker/` 改造）
 
 | worker | 行为 |
 |---|---|
-| **Dispatcher（常驻 goroutine）** | 轮询 `outbox WHERE status='pending' ORDER BY id LIMIT N` → Kafka 发布 `post:created` → ack 后置 `delivered`；失败 → `retry_count+1`，≥3 → `failed` |
+| **Dispatcher（常驻 goroutine）** | 轮询 `outbox WHERE status='pending' ORDER BY id LIMIT N` → Kafka 发布 `post.created` → ack 后置 `delivered`；失败 → `retry_count+1`，≥3 → `failed` |
 | **Compensation（定时 5s ticker）** | 扫描超时未投递的 pending / failed → 重投（上限 3 次，超限保持 failed 记日志） |
 
 - Kafka 客户端：**`segmentio/kafka-go`**（纯 Go、无 cgo，Windows 零摩擦）—— 否决 confluent-kafka-go（需 cgo/librdkafka）
@@ -155,13 +180,13 @@ FollowService: tx { 写 follows + 更新 follower_count/following_count } → CO
 ### 5.3 Fanout 改造（真实粉丝 Push）
 
 - `StubFanoutMode`（恒 PUSH 全用户）→ **`RealFollowersMode`**：
-  - 消费 `post:created`（consumer group `feed-fanout`）
+  - 消费 `post.created`（consumer group `feed-fanout`）
   - 读作者粉丝列表 `user:followers:{author_id}` ZSet（User Service 维护）
   - ZADD post_id → 每个粉丝 + 作者自己的 `feed:home:{uid}`
   - **本期 Push-only**：Fanout 无条件推送给所有真实粉丝，不做阈值分支；大 V Pull 分支（粉丝数 > 1000 走 `feed:inbox` 读时合并）逻辑留 P4，仅保留阈值常量 stub
 - `feed:inbox:{author_id}` 键路径保留不启用
 
-### 5.4 消费 user:follow-changed（`internal/worker/` 新增 consumer）
+### 5.4 消费 user.follow-changed（`internal/worker/` 新增 consumer）
 
 - **Follow**：拉 followee 近期帖子（新增 `LatestByAuthor` 查询，近期 50 条）→ 回填进 follower `feed:home`
 - **Unfollow**：从 follower `feed:home` ZREM 掉 followee 的帖子
@@ -200,13 +225,21 @@ FollowService: tx { 写 follows + 更新 follower_count/following_count } → CO
 | GET | /healthz | - | 公开 |
 
 - **删除** `routes/dev.js`（dev 登录/用户清单）；`middleware/auth.js` 公开前缀 `['/api/dev','/healthz']` → `['/api/auth/register','/api/auth/login','/healthz']`
-- JWT 校验后**新增黑名单检查**：`GET auth:blacklist:{jti}` 存在 → 401
+- JWT 校验后**新增黑名单检查**（R8 读路径）：`GET auth:blacklist:{jti}` 存在 → 401
 - `config.js`：+`GW_USER_ADDR=localhost:9001`；corsOrigins + `http://localhost:3002`
+
+**R3（X-User-ID 透传，下游不再验签）**：Gateway 完成 JWT 校验（签名 + 黑名单）后，向下游 gRPC 调用以 metadata 透传当前用户标识 `X-User-ID`（以及 `X-User-Name`）；Feed/User Service 以 `X-User-ID` 为当前请求用户，**不再自行验签 JWT**（信任边界收敛到 Gateway）。Feed 的 CreatePost / Follow 等需要当前用户的 RPC 从 `X-User-ID` 取 id，而非自行解析 token。
 
 ### 6.2 新增 gRPC 客户端
 
 - `src/grpc/user.js`（仿 feed.js：懒连接 + waitForReady 重连 + breaker 包裹）
 - `src/routes/auth.js`、`src/routes/user.js`
+
+### 6.3 身份透传（X-User-ID，R3）
+
+- Gateway 校验 JWT + 黑名单通过后，向 Feed/User Service 的 gRPC 调用注入 metadata：`X-User-ID: decoded.sub`、`X-User-Name: decoded.username`
+- 下游（Feed/User Service）从 metadata 取 `X-User-ID` 作为当前请求用户，**不自行验签**（HS256 共享密钥仅 Gateway 持有校验权；远期 RSA 后 Gateway 持公钥，User Service 持私钥只签发不校验）
+- Feed 侧 `CreatePost` / `Timeline` 需要当前用户时改从 `X-User-ID` 取，不再依赖 JWT 解析
 
 ---
 
@@ -269,7 +302,7 @@ FollowService: tx { 写 follows + 更新 follower_count/following_count } → CO
 ### 9.3 完成标志
 
 1. 注册/登录/登出/关注/取关端到端可用（浏览器实测）
-2. **发帖走 Kafka 事件**：outbox → Kafka `post:created` → fanout → 粉丝时间线；非粉丝不可见
+2. **发帖走 Kafka 事件**：outbox → Kafka `post.created` → fanout → 粉丝时间线；非粉丝不可见
 3. 关注回填近期帖子、取关清理时间线
 4. 全部测试通过 + e2e 全 PASS
 5. 设计偏差记录于本文档 §2/§10，评审知悉
@@ -286,8 +319,25 @@ FollowService: tx { 写 follows + 更新 follower_count/following_count } → CO
 | D-A4 | 混合 Push/Pull | **Push-only + 阈值 stub** | 无大 V 场景；P4 启用 Pull |
 | D-A5 | 关注按钮位置未定 | 个人主页内（User Remote） | MF 禁止跨 Remote 直接依赖 |
 | D-A6 | 个人主页含帖子列表 | **本期不含** | feed.proto 冻结；P4 新增 RPC 后补 |
-| D-A7 | user:registered 消费初始化时间线 | **本期不消费** | 新用户懒重建已覆盖；P4 Notification 再用 |
+| D-A7 | user.registered 消费初始化时间线 | **本期不消费** | 新用户懒重建已覆盖；P4 Notification 再用 |
 | D-A8 | feed_db.users 种子表 | **移除**，作者信息走 User Service gRPC + Redis 缓存 | D3 正式衔接 |
+
+---
+
+## 10.1 评审修正清单（2026-08-02 评审拍板，设计定稿后补充）
+
+以下修正为设计评审结论，**全部纳入 P2 实现**（已在正文各节落实，编号 R1–R8）：
+
+| # | 修正 | 落点 |
+|---|---|---|
+| R1 | **P2 全服务事件统一采用 Outbox 模式**；User Service 关注事件**移除单纯 `@TransactionalEventListener` 方案**，改用 outbox 表 + 异步投递 + 定时重试兜底，保证消息可靠 | §3.2 / §4.5 |
+| R2 | **JWT 共享 HS256 密钥方案备注安全风险**，远期规划升级 **RSA 非对称** | §4.6 |
+| R3 | **Gateway 鉴权后向下游透传 X-User-ID，下游不再验签** | §6.3 / §4.6 |
+| R4 | **follows 表不启用软删除**，文档注明该限制 | §4.3 |
+| R5 | **关注关系变更主动清理 Redis followers/following 缓存**，缩短脏数据窗口 | §4.4 |
+| R6 | **Kafka topic 统一命名规范，使用 `.` 分隔**（`post.created` / `user.follow-changed` / `user.registered`） | §3.2 |
+| R7 | **user 表预留 status 字段**，预留账号封禁能力 | §4.3 |
+| R8 | **user_sessions 表数据库 revoked 标记与 Redis 黑名单双重兜底鉴权** | §4.3 / §4.6 |
 
 ---
 

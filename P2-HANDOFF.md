@@ -1,7 +1,7 @@
 # P2 交接文档 — User Service + 鉴权 + 关注 + Kafka/outbox
 
 > 本文档是 **P1 → P2 的交接入口**。新开 opencode 会话做 P2 时，先读本文件，再读下方「参考资料索引」中的设计文档。
-> 最后更新：P1 交付当日（HEAD `8ca6ae5`）。
+> 最后更新：P1 交付当日（HEAD `8ca6ae5`）；**2026-08-02 设计评审拍板 R1–R8 修正已纳入 `docs/superpowers/specs/2026-08-01-p2-account-kafka-design.md` §10.1，与下文冲突处以下方为准**。
 
 ---
 
@@ -72,18 +72,18 @@ P1「发帖 → 首页时间线」已端到端交付并推 GitHub；P2 要做 **
 ### 2.2 User Service 设计要点（来自 `user-service.html`）
 - **技术**：设计图是 **Java + Spring Boot**（Controller → Service → Repository）——⚠️ **这是 P2 最大的开放决策，见 §4.1**
 - **对外 gRPC**：Register / Login / GetProfile / UpdateProfile / Follow / Unfollow / GetFollowers / GetFollowing
-- **Kafka 事件（生产）**：`user:registered`、`user:follow-changed`
+- **Kafka 事件（生产）**：`user.registered`、`user.follow-changed`（R6：topic 用 `.` 分隔）
 - **数据库 user_db（独立库）**：
   - `users`：id PK · username UNIQUE · email UNIQUE · password_hash · bio · avatar_url · created_at · updated_at
   - `follows`：(follower_id, followee_id) 联合 PK，FK→users.id，联合唯一索引幂等
   - `user_sessions`：token_id PK · user_id · expires_at · revoked（多端登录/主动下线）
 - **Redis**：`user:profile:{id}` String 10min · `user:followers:{id}` / `user:following:{id}` ZSet 5min · `auth:blacklist:{jti}`（TTL=JWT 剩余有效期，与 Gateway 共享）
-- **关注流程**：本地事务写 follows → `@TransactionalEventListener AFTER_COMMIT` 发 `user:follow-changed` → 失败走本地消息表兜底补偿
+- **关注流程**（R1：outbox 统一模式，主路径）：本地事务写 follows + 写 user_outbox(pending) → COMMIT → 常驻 Dispatcher 异步投递 Kafka `user.follow-changed` → 失败 retry_count+1（≥3→failed），Compensation 定时重投；不再采用单纯 `@TransactionalEventListener` 直发
 - **密码**：BCrypt；**JWT 签发**（换掉 D4 的 dev 方案）
 
 ### 2.3 Feed 侧 outbox 回填（P2 重点改造）
 - 启用 `outbox_events` 表（P1 已建好：id · topic · payload JSON · status ENUM('pending','delivered','failed') · retry_count · created_at）
-- `CreatePost` 事务内写 outbox → 定时补偿 worker 投递 Kafka → Feed 消费 `user:follow-changed` 更新关注者时间线
+- `CreatePost` 事务内写 outbox → 定时补偿 worker 投递 Kafka → Feed 消费 `user.follow-changed` 更新关注者时间线
 - 参考：`plan.md §3.3` Fanout 现行为 + `IMPLEMENTATION_HANDOFF.md §3.4` Feed 设计
 
 ---
@@ -114,7 +114,7 @@ P1「发帖 → 首页时间线」已端到端交付并推 GitHub；P2 要做 **
 - 是否新增 **User Remote**（设计稿 Shell+3 Remote 的第二个 Remote，承载 我的/个人主页/关注列表）？还是 P2 先做 API + 最小 UI？
 
 ### 4.3 Kafka 引入方式
-- KRaft 单节点 docker-compose（与 MySQL/Redis 并列）？Topic 命名 `user:registered` / `user:follow-changed` / `post:created`
+- KRaft 单节点 docker-compose（与 MySQL/Redis 并列）？Topic 命名 `user.registered` / `user.follow-changed` / `post.created`（R6 已定：`.` 分隔）
 - outbox 补偿频率、失败重试上限（参照 Notification/Search 设计的 3 次 + dead-letter 思路）
 
 ### 4.4 关注对 Timeline 的影响

@@ -1,10 +1,10 @@
-# P2 实施计划：账号体系 + 关注 + JWT 鉴权 + Kafka/outbox 事件化
+﻿# P2 实施计划：账号体系 + 关注 + JWT 鉴权 + Kafka/outbox 事件化
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 账号体系（注册/登录/关注/取关 + 正式 JWT 鉴权）可用，Feed 发帖走 Kafka 事件（outbox → Kafka → fanout → 粉丝时间线）。
 
-**Architecture:** 新增 Java 21 + Spring Boot 3 User Service（gRPC :9001，独立 user_db）签发 JWT 并生产 `user:*` 事件；新增 User Remote 微前端（:3002）承载注册/登录/个人主页/关注；Feed Service 改造 CreatePost 事务内写 outbox_events，双 worker（常驻 dispatcher + 定时补偿）投递 `post:created` 到 Kafka，Fanout 由进程内 channel 改为消费 Kafka 事件并向真实粉丝写扩散，同时消费 `user:follow-changed` 做关注回填/取关清理。Gateway 删除 dev 登录，增加 auth/user 路由与黑名单检查。
+**Architecture:** 新增 Java 21 + Spring Boot 3 User Service（gRPC :9001，独立 user_db）签发 JWT 并生产 `user:*` 事件；新增 User Remote 微前端（:3002）承载注册/登录/个人主页/关注；Feed Service 改造 CreatePost 事务内写 outbox_events，双 worker（常驻 dispatcher + 定时补偿）投递 `post.created` 到 Kafka，Fanout 由进程内 channel 改为消费 Kafka 事件并向真实粉丝写扩散，同时消费 `user.follow-changed` 做关注回填/取关清理。Gateway 删除 dev 登录，增加 auth/user 路由与黑名单检查。
 
 **Tech Stack:** Java 21 + Spring Boot 3 + gRPC(net.devh) + MyBatis-Plus + spring-data-redis + spring-kafka + jjwt + spring-security-crypto(BCrypt)；Go 1.26 + segmentio/kafka-go；Node Fastify；React 18 Webpack 5 MF；apache/kafka KRaft 单节点。
 
@@ -15,7 +15,7 @@
 - 数据库：`feed_db`（账号 `feed`/`feed123`，P1 不动表结构）+ 新增 **`user_db`**（账号 `user`/`user123`，经 `02-user.sql` 建库建表）
 - **`proto/feed.proto` 已冻结，不得改动**；新增 `proto/user.proto`（冻结契约）
 - JWT：HS256，`JWT_SECRET` 环境变量 **Gateway 与 User Service 共享**（dev 默认 `dev-secret`），TTL 24h（`JWT_TTL_SECONDS`）
-- 事件 topic：`post:created`（Feed 生产，feed-fanout 组消费）· `user:follow-changed`（User 生产，feed-timeline 组消费）· `user:registered`（User 生产，P2 无人消费）
+- 事件 topic：`post.created`（Feed 生产，feed-fanout 组消费）· `user.follow-changed`（User 生产，feed-timeline 组消费）· `user.registered`（User 生产，P2 无人消费）
 - Kafka 客户端（Go）：**`segmentio/kafka-go`**（纯 Go 无 cgo；禁止 confluent-kafka-go / sarama）
 - Redis 键名与设计一字不差：`user:profile:{id}`(10min) / `user:followers:{id}`(ZSet 5min) / `user:following:{id}`(ZSet 5min) / `auth:blacklist:{jti}`(TTL=JWT 剩余)；Feed 既有 `feed:home:`/`post:detail:` 等不变
 - 种子用户迁移：bob/alice/carol/dave 进 user_db，密码统一 `Password123!`（BCrypt）；**feed_db.users 表移除**，Feed 作者信息改走 User Service gRPC + Redis 缓存
@@ -32,7 +32,7 @@
 |---|---|---|---|---|
 | T1 | 脚手架：切分支、proto/user.proto、user-service Maven 骨架 + mvnw、README 阶段说明 | 根 / proto / services/user-service | - | 控制器直做 |
 | T2 | Infra：docker-compose + Kafka、02-user.sql、infra README 更新 | infra/ | T1 | 派发(quick) |
-| T3 | User Service（Java/Spring Boot，gRPC + BCrypt + JWT + follow + Kafka 生产 + 本地消息表兜底） | services/user-service/ | T1 | 派发(deep) |
+| T3 | User Service（Java/Spring Boot，gRPC + BCrypt + JWT + follow + outbox 事件生产） | services/user-service/ | T1 | 派发(deep) |
 | T4 | Feed Service 改造：outbox 写入 + 双 worker + Kafka 消费（fanout 真实粉丝 + follow-changed 回填/清理）+ 作者信息改 User Service | services/feed-service/ | T1 | 派发(deep) |
 | T5 | Gateway：user gRPC 客户端、auth/user 路由、删 dev.js、黑名单检查、cors | services/gateway/ | T1,T3(契约) | 派发(unspecified-high) |
 | T6 | User Remote 新建（Auth + Profile） | frontend/user-remote/ | T1 | 派发(visual-engineering) |
@@ -219,10 +219,12 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
       avatar_url VARCHAR(255) NOT NULL DEFAULT '',
       follower_count INT NOT NULL DEFAULT 0,
       following_count INT NOT NULL DEFAULT 0,
+      status TINYINT NOT NULL DEFAULT 1, -- R7: 预留账号状态 1=正常 0=封禁（本期不实现封禁流程）
       created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
       updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+  -- R4: follows 不启用软删除；取关物理 DELETE，无历史轨迹（已注明限制）
   CREATE TABLE IF NOT EXISTS follows (
       follower_id BIGINT UNSIGNED NOT NULL,
       followee_id BIGINT UNSIGNED NOT NULL,
@@ -230,6 +232,18 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
       PRIMARY KEY (follower_id, followee_id),
       CONSTRAINT fk_follows_follower FOREIGN KEY (follower_id) REFERENCES users(id),
       CONSTRAINT fk_follows_followee FOREIGN KEY (followee_id) REFERENCES users(id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  -- R1: 事件统一 Outbox 模式——User Service 事件先写本表，dispatcher 异步投递 Kafka（仿 feed outbox_events）
+  CREATE TABLE IF NOT EXISTS user_outbox (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      topic VARCHAR(64) NOT NULL,
+      payload JSON NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending/delivered/failed
+      retry_count INT NOT NULL DEFAULT 0,
+      created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      INDEX idx_user_outbox_status (status, id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
   CREATE TABLE IF NOT EXISTS user_sessions (
@@ -240,6 +254,7 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
       INDEX idx_user_sessions_user_id (user_id),
       CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id) REFERENCES users(id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  -- R8: revoked(DB 权威态) + auth:blacklist:{jti}(Redis 快检) 双重兜底鉴权
 
   -- 密码统一为 Password123! 的 BCrypt 哈希（$2a$10$... 固定串，T3 用 BCrypt.matches 校验）
   -- 哈希生成方法（二选一，任一工具输出固定串填入下方）：
@@ -258,7 +273,7 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
 
 - [ ] **Step 3: 验证**
   - `docker compose up -d` → 三个容器健康（mysql/redis/kafka）
-  - `docker exec b-mysql mysql -uroot -proot123 -e "USE user_db; SHOW TABLES;"` 输出 3 表 + 种子 4 行
+  - `docker exec b-mysql mysql -uroot -proot123 -e "USE user_db; SHOW TABLES;"` 输出 4 表（users/follows/user_sessions/**user_outbox**）+ 种子 4 行
   - Kafka topic 列表可查
 
 - [ ] **Step 4: infra README 更新**
@@ -282,14 +297,14 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
   - `repository/UserMapper.java`、`FollowMapper.java`、`SessionMapper.java`（MyBatis-Plus）
   - `entity/UserEntity.java`、`FollowEntity.java`、`UserSessionEntity.java`
   - `kafka/UserEventPublisher.java`（KafkaTemplate）
-  - `listener/FollowEventListener.java`（`@TransactionalEventListener(phase=AFTER_COMMIT)`）
-  - `util/JwtUtil.java`、`util/UserOutboxService.java`（本地消息表兜底）
+  - `outbox/UserOutboxService.java`（**R1 统一模式**：事务内写 outbox 表 + Dispatcher 异步投递 Kafka + 定时补偿重试，替代单纯 `@TransactionalEventListener` 直发）
+  - `util/JwtUtil.java`
 - Modify: `services/user-service/src/main/resources/application.yml`
 - Test: `src/test/java/social/bbs/user/`（JUnit + Spring Boot Test）
 
 **Interfaces:**
 - Consumes: T1 骨架 + proto/user.proto（protobuf 插件生成 Java stub）、T2 user_db/Kafka
-- Produces: gRPC :9001；`user:registered`/`user:follow-changed` 事件；Redis `user:profile:`/`user:followers:`/`user:following:`/`auth:blacklist:`；JWT（jti+session）—— T5 Gateway 消费
+- Produces: gRPC :9001；`user.registered`/`user.follow-changed` 事件；Redis `user:profile:`/`user:followers:`/`user:following:`/`auth:blacklist:`；JWT（jti+session）—— T5 Gateway 消费
 
 - [ ] **Step 1: 写失败测试（核心逻辑先行）**
   `AuthServiceTest.java`：
@@ -308,22 +323,24 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
   用 H2 内存库 + MyBatis 或 mock Mapper。Run: `.\mvnw test` → 预期 FAIL（类不存在）。
 
 - [ ] **Step 2: 实体 + Mapper（MyBatis-Plus）**
-  `UserEntity`（id/username/email/passwordHash/bio/avatarUrl/displayName/followerCount/followingCount/createdAt/updatedAt，`@TableName("users")`）；`FollowEntity`（联合主键 `@TableId` followerId+followeeId 复合或用 IdType 组合）；`UserSessionEntity`（tokenId 主键）。Mapper 接口 extends `BaseMapper<T>`；FollowMapper 加 `insertIgnore(...)`（`@Insert("INSERT IGNORE INTO follows ...")`）。
+  `UserEntity`（id/username/email/passwordHash/bio/avatarUrl/displayName/followerCount/followingCount/**status**/createdAt/updatedAt，`@TableName("users")`；**R7：status 预留字段**，本期恒为 1，封禁校验留注释检查点）；`FollowEntity`（联合主键 `@TableId` followerId+followeeId 复合或用 IdType 组合）；`UserSessionEntity`（tokenId 主键）；`UserOutboxEntity`（id/topic/payload/status/retryCount/createdAt/updatedAt，仿 Feed outbox_events）。Mapper 接口 extends `BaseMapper<T>`；FollowMapper 加 `insertIgnore(...)`（`@Insert("INSERT IGNORE INTO follows ...")`）。
 
 - [ ] **Step 3: AuthService + JwtUtil**
-  - `JwtUtil`：jjwt 0.12 API，`HS256`，secret 来自 `JwtProperties`（env `JWT_SECRET`，默认 `dev-secret`）；`generate(sub,username,displayName)` 返回 `(token, jti, expiresAt)`；`verify(token)` 返回 claims map
-  - `AuthService.register`：校验 username/email 非空 + 密码 ≥6 → 查重（唯一冲突→`ALREADY_EXISTS`）→ BCrypt encode → insert → 签发 JWT → 写 user_sessions（token_id=jti, expires_at）→ 发 `user:registered` → 返回 AuthResponse
+  - `JwtUtil`：jjwt 0.12 API，`HS256`，secret 来自 `JwtProperties`（env `JWT_SECRET`，默认 `dev-secret`）；`generate(sub,username,displayName)` 返回 `(token, jti, expiresAt)`；`verify(token)` 返回 claims map；**R2：预留算法切换位**（`HS256` 默认常量，`RS256` 常量预留注释，远期升级 RSA 非对称——User 持私钥签发、Gateway 持公钥验签）
+  - `AuthService.register`：校验 username/email 非空 + 密码 ≥6 → 查重（唯一冲突→`ALREADY_EXISTS`）→ BCrypt encode → insert → 签发 JWT → 写 user_sessions（token_id=jti, expires_at）→ **写 user_outbox(pending, topic=user.registered)（R1：事件走 outbox，不直发）** → 返回 AuthResponse
   - `AuthService.login`：account 匹配 username 或 email → 查用户 → BCrypt.matches 校验（错→`UNAUTHENTICATED`）→ 签发 JWT + 写 session → 返回
-  - `AuthService.logout(jti)`：置 session revoked → `auth:blacklist:{jti}` SETEX 剩余有效期
+  - `AuthService.logout(jti)`：**双写（R8）**：置 session revoked=1（DB 权威态）+ `auth:blacklist:{jti}` SETEX 剩余有效期（Redis 快检）
 
 - [ ] **Step 4: UserService（GetProfile/UpdateProfile）**
   - GetProfile：Redis `user:profile:{id}` 命中直返；miss 查库回填（TTL 10min）；不存在→NOT_FOUND；返回含 follower/following count
   - UpdateProfile：改 display_name/bio/avatar_url → update → **删缓存** `user:profile:{id}` → 返回新资料
 
-- [ ] **Step 5: FollowService + 事件**
-  - Follow：follower_id==followee_id→INVALID_ARGUMENT；`INSERT IGNORE` follows；affected==0 视为已关注（幂等不报错）；tx 内 users.follower_count/following_count ±1（≥0 保护）→ COMMIT
-  - FollowEventListener（AFTER_COMMIT）：更新 Redis `user:followers:{followee}`/`user:following:{follower}` ZSet（score=now ms）→ Kafka 发 `user:follow-changed`（payload `{follower_id,followee_id,action:"follow"|"unfollow",created_at}`）
-  - 兜底：`UserOutboxService` 本地表（user_db 建 `user_outbox` 表，结构仿 feed outbox）记录事件；Kafka 发送失败时写表，定时重发（简化：启动定时器每 10s 扫 pending 重发，上限 3 次）
+- [ ] **Step 5: FollowService + outbox 事件（R1 统一模式）**
+  - Follow：follower_id==followee_id→INVALID_ARGUMENT；`INSERT IGNORE` follows；affected==0 视为已关注（幂等不报错）；**tx 内**：users.follower_count/following_count ±1（≥0 保护）+ **INSERT user_outbox(status='pending', topic='user.follow-changed', payload)** → COMMIT
+  - `UserOutboxService`（**主路径**，替代单纯 `@TransactionalEventListener` 直发 Kafka）：
+    - Dispatcher（`@Scheduled` 常驻循环，如 2s 间隔）：`ClaimPending(50)`（status='pending' ORDER BY id）→ KafkaTemplate 发布 `user.follow-changed` → 成功置 delivered；失败 retry_count+1，≥3 → failed
+    - Compensation（`@Scheduled` 5s ticker）：重投 pending 超时（>30s）与 failed（上限 3）
+  - **R5 缓存清理**：follow/unfollow 落库后 **DEL** `user:followers:{followee}` 与 `user:following:{follower}`（先删再等 miss 回填，缩短脏数据窗口）；事件送达后再 DEL 一次对账（幂等无害）
   - GetFollowers/GetFollowing：先 ZSet（5min TTL）缓存读取分页（ZRANGEBYSCORE + cursor）；miss 查库回填
 
 - [ ] **Step 6: gRPC Controller 接线**
@@ -331,7 +348,7 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
 
 - [ ] **Step 7: 测试通过 + 编译**
   Run: `.\mvnw test` → 全绿；`.\mvnw -q package -DskipTests` → BUILD SUCCESS
-  补集成测试：`FollowIntegrationTest`（真实 H2 + mock KafkaTemplate，验证 AFTER_COMMIT 事件只在提交后发、失败入 outbox 表）。
+  补集成测试：`FollowIntegrationTest`（真实 H2 + mock KafkaTemplate，验证 outbox 写入→投递→delivered 流转、失败重试入 failed、事件只在提交后投递）。
 
 - [ ] **Step 8: Commit**
   ```bash
@@ -356,7 +373,7 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
 
 **Interfaces:**
 - Consumes: T1、T2（Kafka/user_db）、user.proto（Go stub：在 services/feed-service/proto/gen 生成 userpb）
-- Produces: `post:created` 事件投递 Kafka；消费 `post:created`（fanout 真实粉丝）与 `user:follow-changed`（回填/清理）；Feed 时间线反映关注关系 —— T8 验证
+- Produces: `post.created` 事件投递 Kafka；消费 `post.created`（fanout 真实粉丝）与 `user.follow-changed`（回填/清理）；Feed 时间线反映关注关系 —— T8 验证
 
 - [ ] **Step 1: 写失败测试**
   - `outbox_repo_test.go`：CreateInTx 写 pending、ClaimPending 只取 pending、MarkDelivered/IncrementRetry/MarkFailed 状态流转（sqlmock）
@@ -370,25 +387,25 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
   - `MarkDelivered(ctx, id)` / `IncrementRetry(ctx, id)`（retry_count+1，≥3→failed）/ `MarkFailed(ctx, id)`
 
 - [ ] **Step 3: CreatePost 写 outbox**
-  `post_service.go`：`posts.Create` 的 tx 内**追加** `outbox.CreateInTx(tx, "post:created", {post_id,user_id,content,created_at})`；**删除** `s.fanout.Enqueue(...)` 与 `fanout` 字段注入。保持返回 Post 不阻塞。
+  `post_service.go`：`posts.Create` 的 tx 内**追加** `outbox.CreateInTx(tx, "post.created", {post_id,user_id,content,created_at})`；**删除** `s.fanout.Enqueue(...)` 与 `fanout` 字段注入。保持返回 Post 不阻塞。
 
 - [ ] **Step 4: Kafka 客户端 + 双 worker**
-  - `internal/kafka/client.go`：segmentio/kafka-go Writer（topic=post:created）+ Reader（group feed-fanout 消费 post:created；group feed-timeline 消费 user:follow-changed）；env：`FEED_KAFKA_ADDR`(localhost:9092) `FEED_USER_ADDR`(localhost:9001)
+  - `internal/kafka/client.go`：segmentio/kafka-go Writer（topic=post.created）+ Reader（group feed-fanout 消费 post.created；group feed-timeline 消费 user.follow-changed）；env：`FEED_KAFKA_ADDR`(localhost:9092) `FEED_USER_ADDR`(localhost:9001)
   - `outbox_dispatcher.go`：常驻 goroutine，循环 ClaimPending(50) → Kafka 发布 → 成功 MarkDelivered / 失败 IncrementRetry；`Compensation`：5s ticker 扫 pending（创建超 30s 未投递）+ failed 重投（上限 3）
   - 失败即不丢：发布 panic/错误 → IncrementRetry；dispatch 循环错误 sleep 1s 重试
 
 - [ ] **Step 5: Fanout 真实粉丝**
   `fanout.go`：删除 StubFanoutMode 与全用户 ListIDs 路径；新增 `RealFollowersMode`：`UserClient.GetFollowerIDs(authorID)`（读 `user:followers:{author}` ZSet，miss→gRPC GetFollowers 回填）→ 每个粉丝 + 作者自己 ZADD feed:home + EXPIRE 7d + 500 上限；阈值常量 `BigVThreshold=1000` 保留 stub（fanout 前查粉丝数，>1000 本期仍走 Push，Pull 分支留 TODO 注释+常量，不实现）。
-  Kafka 消费者（feed-fanout 组）接 post:created → 解 payload → 调 fanout。
+  Kafka 消费者（feed-fanout 组）接 post.created → 解 payload → 调 fanout。
 
-- [ ] **Step 6: 消费 user:follow-changed**
+- [ ] **Step 6: 消费 user.follow-changed**
   `kafka_consumer.go`：feed-timeline 组消费 → action=follow：`LatestByAuthor(followeeID, 0, 50)` → 回填 follower feed:home（ZADD+EXPIRE+上限）；action=unfollow：查 followee 帖子 id → 从 follower feed:home ZREM。
 
 - [ ] **Step 7: 作者信息 + 重建兜底**
   - `user_client.go`：gRPC→User Service GetProfile（懒连接 + waitForReady），带 Redis 回填 `user:profile:{id}`；批量版（时间线一次取多作者）
   - `post_service.go`/`timeline_service.go`：Post 渲染作者 display_name/avatar 改走 `user:profile:{id}` MGET → miss 批量 gRPC；**删除 join feed_db.users 逻辑**
   - timeline 重建（cache miss）：`LatestByAuthors(followingIDs, 50)`（读 `user:following:{uid}` ZSet → miss 查 gRPC GetFollowing），替代全站 Latest
-  - 删除 `repository/user_repo.go`（feed_db.users 表）相关依赖；CreatePost 的 user 存在校验改走 UserClient（原 users.GetByID 删除）
+  - 删除 `repository/user_repo.go`（feed_db.users 表）相关依赖；**CreatePost 的当前用户 id 从 gRPC metadata `X-User-ID` 取（R3：Gateway 透传，Feed 不再验签）**，存在性校验改走 UserClient（原 users.GetByID 删除）
 
 - [ ] **Step 8: 全测试 + vet + build**
   Run: `& "C:\Program Files\Go\bin\go.exe" vet ./...`；`go test ./...` 全绿（P1 19 个测试按改动适配）；`go build ./...`
@@ -418,8 +435,8 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
   `test/auth.test.js`：register 公开可访问（无 token 200）、login 错误密码 401、logout 后旧 token 请求 → 401（黑名单）、受保护路由无 token → 401、错误码映射（User ALREADY_EXISTS→409）。
   预期 FAIL（路由不存在）。
 
-- [ ] **Step 2: grpc/user.js + config**
-  仿 `grpc/feed.js`：懒连接 + waitForReady 重连 + breaker 包裹；导出 userClient。config.js：`userAddr: strEnv('GW_USER_ADDR','localhost:9001')`；corsOrigins push `http://localhost:3002`。
+- [ ] **Step 2: grpc/user.js + config（R3 透传）**
+  仿 `grpc/feed.js`：懒连接 + waitForReady 重连 + breaker 包裹；导出 userClient。config.js：`userAddr: strEnv('GW_USER_ADDR','localhost:9001')`；corsOrigins push `http://localhost:3002`。**R3 透传：`grpc/user.js` 与 `grpc/feed.js` 所有下游 gRPC 调用统一注入 metadata `X-User-ID`（decoded.sub）与 `X-User-Name`（decoded.username）**（封装在 `src/grpc/interceptors.js` 或 client 封装函数内，Feed/User Service 从 metadata 取当前用户，不再自行验签）
 
 - [ ] **Step 3: routes/auth.js + routes/user.js**
   auth.js：`POST /api/auth/register|login|logout`（logout 从 `request.user.jti` 取 jti 调 Logout）。user.js：`GET /api/user/:id`、`PUT /api/user/profile`、`POST/DELETE /api/user/:id/follow`、`GET /api/user/:id/followers|following`。统一 `{code,message,data}` 信封。
@@ -579,8 +596,8 @@ JWT payload：`{sub: String(user_id), username, displayName, jti(UUID), iat, exp
 
 1. `docker compose up` 后 MySQL/Redis/**Kafka** 健康；user_db 建表 + 种子 4 用户（密码 Password123! 可登录）
 2. 注册/登录/登出/关注/取关端到端可用（e2e + 浏览器实测）
-3. **发帖走 Kafka**：新帖 → outbox pending → Kafka `post:created` → fanout → **粉丝**时间线出现；**非粉丝不可见**
-4. 关注 → 回填作者近期帖子；取关 → 时间线清理（消费 `user:follow-changed`）
+3. **发帖走 Kafka**：新帖 → outbox pending → Kafka `post.created` → fanout → **粉丝**时间线出现；**非粉丝不可见**
+4. 关注 → 回填作者近期帖子；取关 → 时间线清理（消费 `user.follow-changed`）
 5. 登出后旧 token → 401（`auth:blacklist:{jti}` 生效）
 6. `infra/demo-e2e.ps1` 全 PASS；`go vet/build/test`、`mvn test`、gateway `npm test`、前端三仓 build 全绿
 7. dev 登录（/api/dev/*）全部下线；无 feed_db.users 残留引用

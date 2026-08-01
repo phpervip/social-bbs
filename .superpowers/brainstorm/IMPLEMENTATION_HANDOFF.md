@@ -43,15 +43,15 @@
 
 **API Gateway**：五层中间件（前置过滤/鉴权安全/限流治理/路由转发/后置处理）；每服务独立熔断；登录注册跳过 JWT 但保留限流+IP 黑名单+CORS；Token 黑名单 Redis TTL=JWT 有效期；重试仅 GET 幂等接口。
 
-**User Service**（Java）：users/follows/user_sessions 表；关注流程事务提交后（AFTER_COMMIT）+ 本地消息表兜底；缓存「先更新库再删缓存」+ TTL 兜底；ZRange 分页；(user_id, followee_id) 唯一索引幂等；只生产不消费 Kafka；演示环境物理外键、生产移除。
+**User Service**（Java）：users/follows/user_sessions/user_outbox 表（R7：users.status 预留封禁字段）；关注流程**事务内写 user_outbox → Dispatcher 异步投递 Kafka + 定时补偿**（R1 统一 outbox 模式，替代单纯 AFTER_COMMIT 直发）；缓存「先更新库再删缓存」+ TTL 兜底（R5：follow/unfollow 后主动 DEL 相关 ZSet）；ZRange 分页；(user_id, followee_id) 唯一索引幂等；只生产不消费 Kafka；演示环境物理外键、生产移除。
 
 **Feed Service**（Go）：Timeline 混合 Push/Pull — 粉丝 ≤1000 写扩散 feed:home ZSet，粉丝 >1000 大 V 走 Pull 读时合并；发帖先响应客户端，Fanout 异步 Worker 执行；outbox_events 发件箱 + 定时补偿保障 Kafka 投递；帖子删除不批量清理 Timeline，前端读取后二次过滤；posts/post_likes/post_comments/outbox_events 表；点赞计数为近似值，最终以 MySQL 为准；关注变更：新增关注回填近期帖子、取关清理。
 
 **Video Service**（Go）：S3 Multipart 分片上传（业务不拼接文件）；InitUpload 分布式锁 upload:init:lock；CompleteUpload 后发转码任务（topic: video:transcode-task）；FFmpeg Worker 分布式锁防重复消费、失败重试上限 3 次 + 死信 + 人工重试；定时 AbortMultipartUpload 清碎片；时效签名 URL + Referer 防盗链；playback 缓存 TTL 自动失效；videos/uploads/transcode_tasks 表；topic 语义：video:transcode-task=待转码指令（消费），video:transcoded=转码结果事件（生产）。
 
-**Notification Service**：统一 Kafka 消费（user:follow-changed/post:created/post:liked/post:commented/video:transcoded）；biz_unique_id + DB 唯一索引 + Redis SETNX 幂等；消费限速 + 批量写入；WS 网关转发链路；离线持久入库、重连拉取；多端已读同步；未读数 MySQL 兜底重建；notifications 表 30 天归档清理。
+**Notification Service**：统一 Kafka 消费（user.follow-changed/post.created/post.liked/post.commented/video.transcoded）；biz_unique_id + DB 唯一索引 + Redis SETNX 幂等；消费限速 + 批量写入；WS 网关转发链路；离线持久入库、重连拉取；多端已读同步；未读数 MySQL 兜底重建；notifications 表 30 天归档清理。
 
-**Search Service**（Go）：ES Sync Consumer（独立 consumer group: es-sync-group）消费 post:created/deleted/updated；biz_unique_id 幂等；写入失败重试 3 次 + dead_letter 表 + 人工重试 + 7 天清理；每 10min 增量扫描 MySQL（updated_at 游标）兜底；检索 multi_match BM25 + filter（author/时间/类型/视频）+ 排序（_score/created_at/like_count + function_score 时间衰减）+ from/size 分页（前端限 100 页，可升级 search_after）；三级降级 L1 Redis 缓存(5min TTL) → L2 ES → L3 MySQL FULLTEXT；ES 需 IK 分词器；**一致性边界：最终一致（秒级），强实时场景直接读 MySQL**。
+**Search Service**（Go）：ES Sync Consumer（独立 consumer group: es-sync-group）消费 post.created/deleted/updated；biz_unique_id 幂等；写入失败重试 3 次 + dead_letter 表 + 人工重试 + 7 天清理；每 10min 增量扫描 MySQL（updated_at 游标）兜底；检索 multi_match BM25 + filter（author/时间/类型/视频）+ 排序（_score/created_at/like_count + function_score 时间衰减）+ from/size 分页（前端限 100 页，可升级 search_after）；三级降级 L1 Redis 缓存(5min TTL) → L2 ES → L3 MySQL FULLTEXT；ES 需 IK 分词器；**一致性边界：最终一致（秒级），强实时场景直接读 MySQL**。
 
 ## 4. 实现计划（已批准：计划 B 纵向切片）
 
