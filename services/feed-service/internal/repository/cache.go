@@ -16,6 +16,8 @@ type Cache interface {
 	Del(ctx context.Context, key string) error
 	SetNX(ctx context.Context, key, value string, ttl time.Duration) (bool, error)
 	ZAdd(ctx context.Context, key string, score float64, member string) error
+	ZRange(ctx context.Context, key string, start, stop int64) ([]string, error)
+	ZRem(ctx context.Context, key, member string) error
 	ZRevRangeByScore(ctx context.Context, key, max, min string, offset, count int64) ([]string, error)
 	ZRemRangeByRank(ctx context.Context, key string, start, stop int64) error
 	Expire(ctx context.Context, key string, ttl time.Duration) error
@@ -70,6 +72,14 @@ func (c *RedisCache) SetNX(ctx context.Context, key, value string, ttl time.Dura
 
 func (c *RedisCache) ZAdd(ctx context.Context, key string, score float64, member string) error {
 	return c.rdb.ZAdd(ctx, key, redis.Z{Score: score, Member: member}).Err()
+}
+
+func (c *RedisCache) ZRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
+	return c.rdb.ZRange(ctx, key, start, stop).Result()
+}
+
+func (c *RedisCache) ZRem(ctx context.Context, key, member string) error {
+	return c.rdb.ZRem(ctx, key, member).Err()
 }
 
 func (c *RedisCache) ZRevRangeByScore(ctx context.Context, key, max, min string, offset, count int64) ([]string, error) {

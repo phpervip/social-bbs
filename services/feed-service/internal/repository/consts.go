@@ -14,8 +14,19 @@ const (
 )
 
 var (
-	FeedHomeTTL   = 7 * 24 * time.Hour // feed:home:{uid} sliding TTL
-	PostDetailTTL = 30 * time.Minute   // post:detail:{id} TTL
-	PostLikesTTL  = 30 * time.Minute   // post:likes:{id} TTL
-	FeedLockTTL   = 5 * time.Second    // feed:lock:{uid} rebuild lock TTL
+	FeedHomeTTL    = 7 * 24 * time.Hour // feed:home:{uid} sliding TTL
+	PostDetailTTL  = 30 * time.Minute   // post:detail:{id} TTL
+	PostLikesTTL   = 30 * time.Minute   // post:likes:{id} TTL
+	FeedLockTTL    = 5 * time.Second    // feed:lock:{uid} rebuild lock TTL
+	UserProfileTTL = 10 * time.Minute   // user:profile:{id} cache TTL (design §4.4)
+	UserFollowsTTL = 5 * time.Minute    // user:followers:{id} / user:following:{id} ZSet TTL
+)
+
+// Outbox dispatch settings (design §5.2).
+const (
+	OutboxBatchSize    = 50               // ClaimPending batch
+	OutboxMaxRetries   = 3                // retries before an event is marked failed
+	OutboxStalePending = 30 * time.Second // pending rows older than this are re-dispatched by compensation
+	OutboxPollInterval = time.Second      // dispatcher idle poll / error backoff
+	OutboxCompInterval = 5 * time.Second  // compensation ticker
 )

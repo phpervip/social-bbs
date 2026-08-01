@@ -8,6 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 
 	"social-bbs/feed-service/internal/repository"
 )
@@ -18,8 +19,11 @@ type fakePostRepo struct {
 	latest []*repository.Post
 }
 
-func (f *fakePostRepo) Create(context.Context, *repository.User, string, string) (*repository.Post, error) {
+func (f *fakePostRepo) Create(context.Context, *gorm.DB, int64, string, string) (*repository.Post, error) {
 	return nil, nil
+}
+func (f *fakePostRepo) WithTx(_ context.Context, fn func(tx *gorm.DB) error) error {
+	return fn(nil) // in-memory: no real tx
 }
 func (f *fakePostRepo) GetByID(_ context.Context, id int64) (*repository.Post, error) {
 	if p, ok := f.posts[id]; ok {
@@ -37,6 +41,17 @@ func (f *fakePostRepo) GetByIDs(_ context.Context, ids []int64) ([]*repository.P
 	return out, nil
 }
 func (f *fakePostRepo) Latest(context.Context, int64, int) ([]*repository.Post, error) {
+	return f.latest, nil
+}
+func (f *fakePostRepo) LatestByAuthor(context.Context, int64, int64, int) ([]*repository.Post, error) {
+	return nil, nil
+}
+func (f *fakePostRepo) LatestByAuthors(_ context.Context, authorIDs []int64, limit int) ([]*repository.Post, error) {
+	// In-memory simplification: author filtering is covered by repo tests.
+	_ = authorIDs
+	if limit > 0 && len(f.latest) > limit {
+		return f.latest[:limit], nil
+	}
 	return f.latest, nil
 }
 func (f *fakePostRepo) Search(context.Context, string, int64, int) ([]*repository.Post, error) {
@@ -85,7 +100,7 @@ func TestTimelineCacheHit(t *testing.T) {
 	p2 := &repository.Post{ID: 2, UserID: 1, Username: "alice", Content: "b", CreatedAt: time.UnixMilli(1000)}
 	seedCachePosts(t, cache, []*repository.Post{p1, p2}, 7)
 
-	svc := NewTimelineService(&fakePostRepo{posts: map[int64]*repository.Post{}}, &fakeLikeRepo{}, cache)
+	svc := NewTimelineService(&fakePostRepo{posts: map[int64]*repository.Post{}}, &fakeLikeRepo{}, cache, &fakeUserClient{})
 	posts, next, hasMore, err := svc.GetHomeTimeline(ctx, 7, 0, 0)
 	if err != nil {
 		t.Fatalf("GetHomeTimeline: %v", err)
@@ -119,7 +134,7 @@ func TestTimelineDropsMissingAndDeleted(t *testing.T) {
 	_ = cache.Set(ctx, "post:detail:1", mustMarshal(t, p1), time.Minute)
 	_ = cache.Set(ctx, "post:detail:3", mustMarshal(t, p3), time.Minute)
 
-	svc := NewTimelineService(&fakePostRepo{posts: map[int64]*repository.Post{1: p1, 3: p3}}, &fakeLikeRepo{}, cache)
+	svc := NewTimelineService(&fakePostRepo{posts: map[int64]*repository.Post{1: p1, 3: p3}}, &fakeLikeRepo{}, cache, &fakeUserClient{})
 	posts, _, _, err := svc.GetHomeTimeline(ctx, 7, 0, 0)
 	if err != nil {
 		t.Fatalf("GetHomeTimeline: %v", err)
@@ -143,7 +158,7 @@ func TestTimelineRebuildOnEmptyZSet(t *testing.T) {
 		latest: []*repository.Post{p5, p4, p3},
 	}
 
-	svc := NewTimelineService(repo, &fakeLikeRepo{}, cache)
+	svc := NewTimelineService(repo, &fakeLikeRepo{}, cache, &fakeUserClient{})
 	posts, next, hasMore, err := svc.GetHomeTimeline(ctx, 9, 0, 0)
 	if err != nil {
 		t.Fatalf("GetHomeTimeline: %v", err)
@@ -185,7 +200,7 @@ func TestTimelineLockContendedFallsBackToMySQL(t *testing.T) {
 		latest: []*repository.Post{p1},
 	}
 
-	svc := NewTimelineService(repo, &fakeLikeRepo{}, cache)
+	svc := NewTimelineService(repo, &fakeLikeRepo{}, cache, &fakeUserClient{})
 	posts, _, _, err := svc.GetHomeTimeline(ctx, 5, 0, 0)
 	if err != nil {
 		t.Fatalf("GetHomeTimeline: %v", err)
@@ -213,7 +228,7 @@ func TestTimelineHasMore(t *testing.T) {
 	}
 	seedCachePosts(t, cache, posts, 3)
 
-	svc := NewTimelineService(&fakePostRepo{posts: byID}, &fakeLikeRepo{}, cache)
+	svc := NewTimelineService(&fakePostRepo{posts: byID}, &fakeLikeRepo{}, cache, &fakeUserClient{})
 	got, next, hasMore, err := svc.GetHomeTimeline(ctx, 3, 0, 0)
 	if err != nil {
 		t.Fatalf("GetHomeTimeline: %v", err)

@@ -1,113 +1,65 @@
-// Package worker implements the in-process async fanout pipeline (plan D2).
-// P2 replaces this with outbox + Kafka; P1 keeps a channel-backed single
-// consumer goroutine inside the Feed Service process.
+// Package worker implements the P2 Kafka-driven fanout pipeline: consuming
+// post.created (real-follower fanout) and user.follow-changed (backfill /
+// cleanup), plus the outbox dispatcher (design §5.2/§5.3/§5.4).
 package worker
 
 import (
 	"context"
 	"strconv"
-	"sync"
 
 	"social-bbs/feed-service/internal/repository"
 )
 
-// FanoutEvent is the unit of work consumed by the fanout worker.
+// FanoutEvent is the unit of fanout work decoded from post.created.
 type FanoutEvent struct {
 	PostID      int64
 	AuthorID    int64
 	CreatedAtMs int64
 }
 
-// FanoutMode decides whether a post is pushed to followers' home timelines
-// (plan §1.1 D5 — big-V pull threshold stub, default all-Push).
-type FanoutMode interface {
-	// ShouldPush reports whether authorID's posts must be PUSH-fanned out.
-	ShouldPush(ctx context.Context, authorID int64) (bool, error)
+// BigVThreshold is the P2 stub for the big-V Pull branch (design D-A4): authors
+// with more followers than this would switch to a pull model in P4. P2 stays
+// Push-only, so the constant is retained but never consulted.
+const BigVThreshold = 1000 // TODO(P4): fanout > threshold via feed:inbox read-time merge
+
+// FanoutHandler pushes a created post into the author's real followers' home
+// timelines plus the author's own (design §5.3 RealFollowersMode).
+type FanoutHandler struct {
+	cache repository.Cache
+	users repository.UserClient
 }
 
-// StubFanoutMode always returns PUSH (global fanout). P2 replaces it with a
-// real follower-count query.
-type StubFanoutMode struct{}
-
-// ShouldPush implements FanoutMode: P1 fans out to all users, including the author.
-func (StubFanoutMode) ShouldPush(context.Context, int64) (bool, error) { return true, nil }
-
-// Enqueuer abstracts the async fanout queue for the post service.
-type Enqueuer interface {
-	Enqueue(FanoutEvent)
+// NewFanoutHandler wires the fanout handler.
+func NewFanoutHandler(cache repository.Cache, users repository.UserClient) *FanoutHandler {
+	return &FanoutHandler{cache: cache, users: users}
 }
 
-// Worker asynchronously pushes new posts into every user's feed:home ZSet.
-// Channel capacity is 1024; when the queue is full, Enqueue falls back to a
-// synchronous fanout so posts are never lost.
-type Worker struct {
-	ch       chan FanoutEvent
-	mode     FanoutMode
-	cache    repository.Cache
-	users    repository.UserRepo
-	wg       sync.WaitGroup
-	mu       sync.Mutex
-	stopOnce sync.Once
-}
-
-// NewWorker starts the single-consumer fanout goroutine.
-func NewWorker(cache repository.Cache, users repository.UserRepo, mode FanoutMode) *Worker {
-	w := &Worker{
-		ch:    make(chan FanoutEvent, repository.FanoutQueueCapacity),
-		mode:  mode,
-		cache: cache,
-		users: users,
-	}
-	w.wg.Add(1)
-	go w.run()
-	return w
-}
-
-// Enqueue queues an event; when the queue is full it fans out synchronously as
-// a fallback.
-func (w *Worker) Enqueue(ev FanoutEvent) {
-	select {
-	case w.ch <- ev:
-	default:
-		w.fanout(context.Background(), ev)
-	}
-}
-
-func (w *Worker) run() {
-	defer w.wg.Done()
-	for ev := range w.ch {
-		w.fanout(context.Background(), ev)
-	}
-}
-
-// Stop drains the channel and waits for the consumer to finish. Safe to call
-// multiple times. Callers must ensure no Enqueue happens after Stop (main shuts
-// down the gRPC server first, draining in-flight RPCs).
-func (w *Worker) Stop() {
-	w.stopOnce.Do(func() {
-		close(w.ch)
-		w.wg.Wait()
-	})
-}
-
-// fanout performs the global push: for every user, ZADD the post into
-// feed:home:{uid}, slide the 7d TTL, and cap the ZSet at 500 members
-// (ZREMRANGEBYRANK 0 -501 drops the oldest beyond 500).
-func (w *Worker) fanout(ctx context.Context, ev FanoutEvent) {
-	push, err := w.mode.ShouldPush(ctx, ev.AuthorID)
-	if err != nil || !push {
-		return
-	}
-	ids, err := w.users.ListIDs(ctx)
+// Handle fans ev out: follower ids come from user:followers:{author} (ZSet,
+// gRPC backfill on miss); every follower AND the author get the post ZADDed
+// into feed:home:{uid} with the created_at score, a slid 7d TTL, and the
+// 500-member cap.
+func (h *FanoutHandler) Handle(ctx context.Context, ev FanoutEvent) error {
+	followerIDs, err := h.users.GetFollowerIDs(ctx, ev.AuthorID)
 	if err != nil {
-		return
+		return err
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for _, uid := range ids {
+	// The author's own feed always receives the post (self-view + rebuild base).
+	targets := appendUnique(followerIDs, ev.AuthorID)
+	for _, uid := range targets {
 		key := repository.FeedHomeKey(uid)
-		_ = w.cache.ZAdd(ctx, key, float64(ev.CreatedAtMs), strconv.FormatInt(ev.PostID, 10))
-		_ = w.cache.Expire(ctx, key, repository.FeedHomeTTL)
-		_ = w.cache.ZRemRangeByRank(ctx, key, 0, -501)
+		_ = h.cache.ZAdd(ctx, key, float64(ev.CreatedAtMs), strconv.FormatInt(ev.PostID, 10))
+		_ = h.cache.Expire(ctx, key, repository.FeedHomeTTL)
+		_ = h.cache.ZRemRangeByRank(ctx, key, 0, -(repository.TimelineMaxSize + 1))
 	}
+	return nil
+}
+
+// appendUnique returns ids with extra appended unless already present.
+func appendUnique(ids []int64, extra int64) []int64 {
+	for _, id := range ids {
+		if id == extra {
+			return ids
+		}
+	}
+	return append(ids, extra)
 }
