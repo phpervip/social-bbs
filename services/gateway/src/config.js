@@ -20,6 +20,7 @@ const config = {
   host: strEnv('GW_HOST', '0.0.0.0'),
   feedAddr: strEnv('GW_FEED_ADDR', 'localhost:9000'),
   userAddr: strEnv('GW_USER_ADDR', 'localhost:9001'),
+  videoAddr: strEnv('GW_VIDEO_ADDR', 'localhost:9002'),
   jwtSecret: strEnv('JWT_SECRET', 'dev-secret'),
   jwtTtlSeconds: intEnv('JWT_TTL', 24 * 60 * 60), // 24h, matches User Service JWT TTL
   redisAddr: strEnv('GW_REDIS_ADDR', 'localhost:6379'),

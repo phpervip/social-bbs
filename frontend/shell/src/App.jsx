@@ -18,6 +18,13 @@ const User = {
   Profile: React.lazy(() => import('user/Profile')),
 };
 
+// Video Remote (:3003) — Upload / Player / List.
+const Video = {
+  VideoUpload: React.lazy(() => import('video/VideoUpload')),
+  VideoPlayer: React.lazy(() => import('video/VideoPlayer')),
+  VideoList: React.lazy(() => import('video/VideoList')),
+};
+
 const PageFallback = () => (
   <div className="page" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <ui.Skeleton height={90} />
@@ -55,6 +62,9 @@ export default function App() {
           <Route path="/explore" element={<RemotePage Component={Feed.Explore} />} />
           <Route path="/post/:id" element={<RemotePage Component={Feed.PostDetail} />} />
           <Route path="/profile/:id" element={<RemotePage Component={User.Profile} />} />
+          <Route path="/upload" element={<RemotePage Component={Video.VideoUpload} />} />
+          <Route path="/video/:id" element={<RemotePage Component={Video.VideoPlayer} />} />
+          <Route path="/videos" element={<RemotePage Component={Video.VideoList} />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

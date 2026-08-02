@@ -1,12 +1,13 @@
 ﻿# start-all.ps1 — B (social-bbs) 本地一键启动脚本（Windows PowerShell 5.1+）
 #
 # 启动顺序（与根目录 README / infra/README 一致）：
-#   1) docker compose up -d          （infra/，MySQL b-mysql:3306 + Redis b-redis:6379）
+#   1) docker compose up -d          （infra/，MySQL + Redis + MinIO）
 #   2) 等待 MySQL / Redis 就绪        （docker exec mysqladmin ping / redis-cli ping 轮询）
-#   3) Feed Service (Go)  :9000      （go run ./cmd/server，env: FEED_GRPC_ADDR/FEED_DB_DSN/FEED_REDIS_ADDR）
-#   4) Gateway (Node)     :8080      （npm run dev = nodemon src/server.js）
-#   5) Shell (MF Host)    :3000      （npm run dev = webpack serve）
-#   6) Feed Remote (MF)   :3001      （npm run dev = webpack serve）
+#   3) Feed Service (Go)  :9000      （go run ./cmd/server）
+#   4) Video Service (Go) :9002      （go run ./cmd/server）
+#   5) Gateway (Node)     :8080      （npm run dev = nodemon src/server.js）
+#   6) Shell (:3000) + Feed Remote (:3001) + User Remote (:3002)
+#   7) Video Remote (:3003)
 #
 # 日志重定向到 $env:TEMP\b-logs\（本机 TEMP 为 D:\Personal\Temp\opencode 时即
 # D:\Personal\Temp\opencode\b-logs），每个服务一对 .out.log / .err.log。
@@ -32,9 +33,13 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot          # 仓库根目录
 $InfraDir    = $PSScriptRoot                              # infra/
 $FeedDir     = Join-Path $ProjectRoot 'services\feed-service'
+$UserDir     = Join-Path $ProjectRoot 'services\user-service'
+$VideoDir    = Join-Path $ProjectRoot 'services\video-service'
 $GatewayDir  = Join-Path $ProjectRoot 'services\gateway'
 $ShellDir    = Join-Path $ProjectRoot 'frontend\shell'
-$RemoteDir   = Join-Path $ProjectRoot 'frontend\feed-remote'
+$FeedRemoteDir  = Join-Path $ProjectRoot 'frontend\feed-remote'
+$UserRemoteDir  = Join-Path $ProjectRoot 'frontend\user-remote'
+$VideoRemoteDir = Join-Path $ProjectRoot 'frontend\video-remote'
 
 $LogDir  = Join-Path $env:TEMP 'b-logs'
 $PidFile = Join-Path $LogDir 'start-all.pids.json'        # PID 记录（-Stop 跨会话使用）
@@ -43,6 +48,10 @@ $PidFile = Join-Path $LogDir 'start-all.pids.json'        # PID 记录（-Stop �
 $FeedGRPCAddr  = if ($env:FEED_GRPC_ADDR)  { $env:FEED_GRPC_ADDR }  else { ':9000' }
 $FeedDBDsn     = if ($env:FEED_DB_DSN)     { $env:FEED_DB_DSN }     else { 'feed:feed123@tcp(127.0.0.1:3306)/feed_db?charset=utf8mb4&parseTime=True&loc=Local' }
 $FeedRedisAddr = if ($env:FEED_REDIS_ADDR) { $env:FEED_REDIS_ADDR } else { 'localhost:6379' }
+
+# Video Service 环境变量
+$VideoGRPCAddr = if ($env:VIDEO_GRPC_ADDR) { $env:VIDEO_GRPC_ADDR } else { ':9002' }
+$VideoDBDsn    = if ($env:VIDEO_DB_DSN)    { $env:VIDEO_DB_DSN }    else { 'video:video123@tcp(127.0.0.1:3306)/video_db?charset=utf8mb4&parseTime=True&loc=Local' }
 
 # 健康检查超时（秒）
 $MySqlTimeout    = 90
@@ -156,10 +165,13 @@ function Stop-Tree {
 # 保存 PID 清单（供 -Stop 跨会话使用）
 function Save-Pids {
     $pids = [ordered]@{
-        feedService = $FeedProc.Id
-        gateway     = $GatewayProc.Id
-        shell       = $ShellProc.Id
-        feedRemote  = $FeedRemoteProc.Id
+        feedService  = $FeedProc.Id
+        videoService = $VideoProc.Id
+        gateway      = $GatewayProc.Id
+        shell        = $ShellProc.Id
+        feedRemote   = $FeedRemoteProc.Id
+        userRemote   = $UserRemoteProc.Id
+        videoRemote  = $VideoRemoteProc.Id
     }
     $pids | ConvertTo-Json | Set-Content -LiteralPath $PidFile -Encoding UTF8
     Write-Host "   PID 清单已写入: $PidFile" -ForegroundColor Gray
@@ -172,7 +184,7 @@ if ($Stop) {
     Write-Step '停止全部服务（按 PID 杀进程树）'
     if (Test-Path -LiteralPath $PidFile) {
         $pids = Get-Content -LiteralPath $PidFile -Raw | ConvertFrom-Json
-        foreach ($name in @('feedService', 'gateway', 'shell', 'feedRemote')) {
+        foreach ($name in @('feedService', 'videoService', 'gateway', 'shell', 'feedRemote', 'userRemote', 'videoRemote')) {
             if ($pids.$name -and $pids.$name -gt 0) {
                 Stop-Tree -Pid ([int]$pids.$name)
                 Write-Host "   已停止 $name (PID $($pids.$name))"
@@ -226,7 +238,7 @@ catch {
 }
 
 # 1) 基础设施
-Write-Step '1/5 docker compose up -d（MySQL + Redis）'
+Write-Step '1/7 docker compose up -d（MySQL + Redis + MinIO）'
 Push-Location $InfraDir
 try {
     & docker compose up -d
@@ -235,7 +247,7 @@ try {
 finally { Pop-Location }
 
 # 2) 等待基础设施就绪
-Write-Step '2/5 等待 MySQL / Redis 就绪'
+Write-Step '2/7 等待 MySQL / Redis 就绪'
 if (-not (Wait-MySqlReady)) {
     Write-ErrorExit 'MySQL 在限时内未就绪。执行 `cd infra; docker compose ps` / `docker compose logs mysql` 排查。'
 }
@@ -246,29 +258,47 @@ if (-not (Wait-RedisReady)) {
 Write-Host '   [redis] 就绪 (PONG)' -ForegroundColor Green
 
 # 3) Feed Service（Go :9000）
-Write-Step '3/5 Feed Service (Go, :9000)'
+Write-Step '3/7 Feed Service (Go, :9000)'
 $env:FEED_GRPC_ADDR  = $FeedGRPCAddr
 $env:FEED_DB_DSN     = $FeedDBDsn
 $env:FEED_REDIS_ADDR = $FeedRedisAddr
 $FeedProc = Start-Bg -Name 'feed-service' -FilePath $goExe -ArgumentList @('run', './cmd/server') -WorkingDirectory $FeedDir
 Start-Sleep -Seconds 3 # 给 gRPC 监听一点启动时间（无 HTTP 健康端点，靠日志确认）
 
-# 4) Gateway（Node :8080）
-Write-Step '4/5 Gateway (Node, :8080)'
+# 4) Video Service（Go :9002）
+Write-Step '4/7 Video Service (Go, :9002)'
+$env:VIDEO_GRPC_ADDR = $VideoGRPCAddr
+$env:VIDEO_DB_DSN    = $VideoDBDsn
+$VideoProc = Start-Bg -Name 'video-service' -FilePath $goExe -ArgumentList @('run', './cmd/server') -WorkingDirectory $VideoDir
+Start-Sleep -Seconds 3
+
+# 5) Gateway（Node :8080）
+Write-Step '5/7 Gateway (Node, :8080)'
 $GatewayProc = Start-Bg -Name 'gateway' -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $GatewayDir
 if (-not (Wait-HttpUp -Name 'gateway' -Url 'http://localhost:8080/healthz')) {
     Write-ErrorExit 'Gateway 健康检查失败（http://localhost:8080/healthz）。查看 gateway.err.log。'
 }
 
-# 5) 前端 Shell / Feed Remote
-Write-Step '5/5 Shell (:3000) + Feed Remote (:3001)'
+# 6) 前端 Shell / Feed Remote / User Remote
+Write-Step '6/7 Shell (:3000) + Feed Remote (:3001) + User Remote (:3002)'
 $ShellProc = Start-Bg -Name 'shell' -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $ShellDir
 if (-not (Wait-HttpUp -Name 'shell' -Url 'http://localhost:3000')) {
     Write-ErrorExit 'Shell 启动失败（http://localhost:3000）。查看 shell.err.log。'
 }
-$FeedRemoteProc = Start-Bg -Name 'feed-remote' -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $RemoteDir
+$FeedRemoteProc = Start-Bg -Name 'feed-remote' -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $FeedRemoteDir
 if (-not (Wait-HttpUp -Name 'feed-remote' -Url 'http://localhost:3001')) {
     Write-ErrorExit 'Feed Remote 启动失败（http://localhost:3001）。查看 feed-remote.err.log。'
+}
+$UserRemoteProc = Start-Bg -Name 'user-remote' -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $UserRemoteDir
+if (-not (Wait-HttpUp -Name 'user-remote' -Url 'http://localhost:3002')) {
+    Write-ErrorExit 'User Remote 启动失败（http://localhost:3002）。查看 user-remote.err.log。'
+}
+
+# 7) Video Remote
+Write-Step '7/7 Video Remote (:3003)'
+$VideoRemoteProc = Start-Bg -Name 'video-remote' -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $VideoRemoteDir
+if (-not (Wait-HttpUp -Name 'video-remote' -Url 'http://localhost:3003')) {
+    Write-ErrorExit 'Video Remote 启动失败（http://localhost:3003）。查看 video-remote.err.log。'
 }
 
 # 保存 PID + 输出汇总
@@ -280,8 +310,11 @@ Write-Host '  Service        PID    URL' -ForegroundColor White
 Write-Host '  -------------- -----  -----------------------------' -ForegroundColor Gray
 Write-Host ('  Shell          {0,-5}  http://localhost:3000' -f $ShellProc.Id)
 Write-Host ('  Feed Remote    {0,-5}  http://localhost:3001' -f $FeedRemoteProc.Id)
+Write-Host ('  User Remote    {0,-5}  http://localhost:3002' -f $UserRemoteProc.Id)
+Write-Host ('  Video Remote   {0,-5}  http://localhost:3003' -f $VideoRemoteProc.Id)
 Write-Host ('  Gateway        {0,-5}  http://localhost:8080/healthz' -f $GatewayProc.Id)
 Write-Host ('  Feed Service   {0,-5}  :9000 (gRPC)' -f $FeedProc.Id)
+Write-Host ('  Video Service  {0,-5}  :9002 (gRPC)' -f $VideoProc.Id)
 Write-Host ''
-Write-Host '  浏览器打开 http://localhost:3000 → dev 登录 → 发帖' -ForegroundColor Cyan
+Write-Host '  浏览器打开 http://localhost:3000 → 登录 → 发帖/上传视频' -ForegroundColor Cyan
 Write-Host "  日志目录: $LogDir  |  停止: .\infra\start-all.ps1 -Stop" -ForegroundColor Gray

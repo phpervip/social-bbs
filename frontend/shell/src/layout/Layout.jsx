@@ -6,6 +6,8 @@ import Logo from './Logo';
 const NAV_ITEMS = [
   { to: '/home', label: '首页', icon: '🏠', disabled: false },
   { to: '/explore', label: '探索', icon: '🔍', disabled: false },
+  { to: '/upload', label: '上传视频', icon: '🎬', disabled: false },
+  { to: '/videos', label: '视频', icon: '📹', disabled: false },
   { to: '/notifications', label: '通知', icon: '🔔', disabled: true, hint: 'P4 开放' },
   { to: '/profile', label: '我的', icon: '👤', disabled: false },
 ];

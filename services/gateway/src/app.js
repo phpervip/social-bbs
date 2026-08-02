@@ -15,9 +15,11 @@ const { createRateMiddleware } = require('./middleware/rate');
 const { createBreaker } = require('./middleware/breaker');
 const { createFeedClient } = require('./grpc/feed');
 const { createUserClient } = require('./grpc/user');
+const { getVideoClient } = require('./grpc/video');
 const { createAuthRoutes } = require('./routes/auth');
 const { createUserRoutes } = require('./routes/user');
 const { createFeedRoutes } = require('./routes/feed');
+const { createVideoRoutes } = require('./routes/video');
 
 function buildApp({
   logger = pino({ level: process.env.LOG_LEVEL || 'info' }),
@@ -55,10 +57,12 @@ function buildApp({
   // --- Layer 4/5: routes + envelope (forwarding through breaker-wrapped clients) ---
   const feed = feedClient || createFeedClient({ address: config.feedAddr, breaker });
   const user = userClient || createUserClient({ address: config.userAddr, breaker });
+  const video = getVideoClient({ address: config.videoAddr, breaker });
 
   app.register(createAuthRoutes, { userClient: user });
   app.register(createUserRoutes, { userClient: user });
   app.register(createFeedRoutes, { feedClient: feed });
+  app.register(createVideoRoutes, { videoClient: video });
 
   // Healthz — no auth, no rate limit (exempt in both middlewares).
   app.get('/healthz', async (_request, reply) => reply.send({ code: 0, message: 'ok', data: null }));
@@ -70,6 +74,7 @@ function buildApp({
 
   app.decorate('feedClient', feed);
   app.decorate('userClient', user);
+  app.decorate('videoClient', video);
   return app;
 }
 

@@ -4,7 +4,8 @@ const { ModuleFederationPlugin } = require('webpack').container;
 
 /**
  * B — Shell micro-frontend host.
- * Port 3000. Consumes Feed Remote (:3001) via Module Federation.
+ * Port 3000. Consumes Feed Remote (:3001), User Remote (:3002) and
+ * Video Remote (:3003) via dynamic (lazy) Module Federation.
  * Shares the app-level `@b/shared` module (api client + event bus + UI kit).
  */
 module.exports = (env, argv) => {
@@ -45,9 +46,53 @@ module.exports = (env, argv) => {
     plugins: [
       new ModuleFederationPlugin({
         name: 'shell',
+        // Dynamic (lazy) remotes: fetch remoteEntry.js at runtime via <script>
+        // injection so the shell compiles & boots even when a remote is down.
+        // Unreachable remotes resolve to a stub whose get() rejects — React.lazy
+        // throws and ErrorBoundary renders the fallback instead of crashing.
         remotes: {
-          feed: 'feed@http://localhost:3001/remoteEntry.js',
-          user: 'user@http://localhost:3002/remoteEntry.js',
+          feed: `promise new Promise((resolve) => {
+            const name = 'feed', url = 'http://localhost:3001/remoteEntry.js';
+            const script = document.createElement('script');
+            script.src = url;
+            script.onload = () => resolve({
+              get: (req) => window[name].get(req),
+              init: (arg) => { try { return window[name].init(arg); } catch (e) { console.warn('[mf] feed init', e); } },
+            });
+            script.onerror = () => resolve({
+              get: (req) => Promise.reject(new Error('feed remote unavailable while loading ' + req)),
+              init: () => undefined,
+            });
+            document.head.appendChild(script);
+          })`,
+          user: `promise new Promise((resolve) => {
+            const url = 'http://localhost:3002/remoteEntry.js';
+            const script = document.createElement('script');
+            script.src = url;
+            script.onload = () => resolve({
+              get: (req) => window.user.get(req),
+              init: (arg) => { try { return window.user.init(arg); } catch (e) { console.warn('[user] init', e); } },
+            });
+            script.onerror = () => resolve({
+              get: (req) => Promise.reject(new Error('user remote unavailable while loading ' + req)),
+              init: () => undefined,
+            });
+            document.head.appendChild(script);
+          })`,
+          video: `promise new Promise((resolve) => {
+            const url = 'http://localhost:3003/remoteEntry.js';
+            const script = document.createElement('script');
+            script.src = url;
+            script.onload = () => resolve({
+              get: (req) => window.video.get(req),
+              init: (arg) => { try { return window.video.init(arg); } catch (e) { console.warn('[video] init', e); } },
+            });
+            script.onerror = () => resolve({
+              get: (req) => Promise.reject(new Error('video remote unavailable while loading ' + req)),
+              init: () => undefined,
+            });
+            document.head.appendChild(script);
+          })`,
         },
         shared: {
           // Host-provided deps must be eager so async-consumed remotes (and the
