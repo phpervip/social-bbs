@@ -4,6 +4,7 @@
 
 $base = "http://localhost:8080"
 $pass = "Password123!"
+$rand = Get-Random -Maximum 99999
 
 Write-Host "=== P2 Demo: 账号体系 + 关注 + Kafka 事件化 ===" -ForegroundColor Cyan
 Write-Host ""
@@ -20,15 +21,15 @@ try {
 
 # 2. Register alice
 Write-Host "2. Register alice" -ForegroundColor Yellow
-$aliceBody = @{username="demo_alice";email="demo_alice@test.com";password=$pass;display_name="Demo Alice"} | ConvertTo-Json
+$aliceBody = @{username="alice_$rand";email="alice_$rand@test.com";password=$pass;display_name="Alice"} | ConvertTo-Json
 $alice = Invoke-RestMethod -Uri "$base/api/auth/register" -Method Post -Body $aliceBody -ContentType "application/json" -TimeoutSec 15
 $aTok = $alice.data.token
 $aUid = $alice.data.user.id
-Write-Host "   alice id=$aUid, token=$($aTok.Substring(0,30))..." -ForegroundColor Green
+Write-Host "   alice id=$aUid" -ForegroundColor Green
 
 # 3. Register bob
 Write-Host "3. Register bob" -ForegroundColor Yellow
-$bobBody = @{username="demo_bob";email="demo_bob@test.com";password=$pass;display_name="Demo Bob"} | ConvertTo-Json
+$bobBody = @{username="bob_$rand";email="bob_$rand@test.com";password=$pass;display_name="Bob"} | ConvertTo-Json
 $bob = Invoke-RestMethod -Uri "$base/api/auth/register" -Method Post -Body $bobBody -ContentType "application/json" -TimeoutSec 15
 $bTok = $bob.data.token
 $bUid = $bob.data.user.id
@@ -45,7 +46,8 @@ Write-Host "5. Bob posts 3 posts" -ForegroundColor Yellow
 1..3 | ForEach-Object {
     $pBody = @{content="Demo post #$_ at $(Get-Date -Format HH:mm:ss)"} | ConvertTo-Json
     $p = Invoke-WebRequest -Uri "$base/api/feed/post" -Method Post -Body $pBody -ContentType "application/json" -Headers @{Authorization="Bearer $bTok"} -TimeoutSec 15
-    Write-Host "   post #${_}: $(($p.Content | ConvertFrom-Json).data.id)" -ForegroundColor Green
+    $pId = ($p.Content | ConvertFrom-Json).data.id
+    Write-Host "   post #${_}: $pId" -ForegroundColor Green
 }
 
 # 6. Alice home timeline (should see bob's posts)
