@@ -47,6 +47,7 @@ module.exports = (env, argv) => {
         name: 'shell',
         remotes: {
           feed: 'feed@http://localhost:3001/remoteEntry.js',
+          user: 'user@http://localhost:3002/remoteEntry.js',
         },
         shared: {
           // Host-provided deps must be eager so async-consumed remotes (and the

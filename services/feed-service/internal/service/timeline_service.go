@@ -17,11 +17,12 @@ type timelineService struct {
 	posts repository.PostRepo
 	likes repository.LikeRepo
 	cache repository.Cache
+	users repository.UserClient
 }
 
 // NewTimelineService wires the timeline service.
-func NewTimelineService(posts repository.PostRepo, likes repository.LikeRepo, cache repository.Cache) TimelineService {
-	return &timelineService{posts: posts, likes: likes, cache: cache}
+func NewTimelineService(posts repository.PostRepo, likes repository.LikeRepo, cache repository.Cache, users repository.UserClient) TimelineService {
+	return &timelineService{posts: posts, likes: likes, cache: cache, users: users}
 }
 
 // GetHomeTimeline implements the cache-first, rebuild-on-empty timeline contract:
@@ -29,9 +30,10 @@ func NewTimelineService(posts repository.PostRepo, likes repository.LikeRepo, ca
 //     exclusive max bound (0 → +inf)
 //   - on hit: MGET post:detail:{id}, batch-fetch misses from MySQL, drop
 //     missing/soft-deleted posts (server-side filtering), re-sort by ZSet order
-//   - on miss (ZSet missing/empty): rebuild from the latest 50 posts under
-//     feed:lock:{uid} (SET NX EX 5); if the lock is held elsewhere, fall back to
-//     a direct MySQL query without rebuilding
+//   - on miss (ZSet missing/empty): rebuild from the following list
+//     (user:following:{uid} ZSet + LatestByAuthors, including self — design
+//     §5.5) under feed:lock:{uid} (SET NX EX 5); if the lock is held elsewhere,
+//     fall back to a direct MySQL query without rebuilding
 func (s *timelineService) GetHomeTimeline(ctx context.Context, userID, cursor int64, limit int) ([]*repository.Post, int64, bool, error) {
 	limit = clampLimit(limit)
 	key := repository.FeedHomeKey(userID)
@@ -51,18 +53,21 @@ func (s *timelineService) GetHomeTimeline(ctx context.Context, userID, cursor in
 			if derr != nil {
 				return nil, 0, false, derr
 			}
+			enrichAuthors(ctx, s.users, posts)
 			return s.finish(ctx, posts, userID, limit)
 		}
 		defer s.cache.Del(ctx, repository.FeedLockKey(userID))
 
-		recent, rerr := s.posts.Latest(ctx, 0, repository.RebuildBatchSize)
+		recent, rerr := s.rebuildSource(ctx, userID)
 		if rerr != nil {
 			return nil, 0, false, rerr
 		}
 		for _, p := range recent {
 			_ = s.cache.ZAdd(ctx, key, float64(p.CreatedAtMs()), strconv.FormatInt(p.ID, 10))
 		}
-		_ = s.cache.Expire(ctx, key, repository.FeedHomeTTL)
+		if len(recent) > 0 {
+			_ = s.cache.Expire(ctx, key, repository.FeedHomeTTL)
+		}
 
 		ids, err = s.readTimeline(ctx, key, cursor, int64(limit+1))
 		if err != nil {
@@ -71,7 +76,20 @@ func (s *timelineService) GetHomeTimeline(ctx context.Context, userID, cursor in
 	}
 
 	posts := s.fetchByIDs(ctx, ids, userID)
+	enrichAuthors(ctx, s.users, posts)
 	return s.finish(ctx, posts, userID, limit)
+}
+
+// rebuildSource returns the posts a timeline is rebuilt from: the newest posts
+// by the user's following list (user:following:{uid} ZSet via UserClient) plus
+// the user themself. When User Service is unreachable it degrades to the P1
+// global latest query.
+func (s *timelineService) rebuildSource(ctx context.Context, userID int64) ([]*repository.Post, error) {
+	following, err := s.users.GetFollowingIDs(ctx, userID)
+	if err != nil {
+		return s.posts.Latest(ctx, 0, repository.RebuildBatchSize)
+	}
+	return s.posts.LatestByAuthors(ctx, appendUnique(following, userID), repository.RebuildBatchSize)
 }
 
 // readTimeline returns ZSet member ids newest-first. cursor is exclusive
@@ -136,6 +154,36 @@ func (s *timelineService) fetchByIDs(ctx context.Context, ids []string, viewerID
 	return out
 }
 
+// enrichAuthors fills Username/DisplayName/AvatarURL from User Service
+// (user:profile:{id} MGET + gRPC misses). Best effort: enrichment failures
+// leave the fields empty rather than failing the timeline.
+func enrichAuthors(ctx context.Context, users repository.UserClient, posts []*repository.Post) {
+	ids := make(map[int64]struct{}, len(posts))
+	for _, p := range posts {
+		if p != nil && p.UserID > 0 {
+			ids[p.UserID] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	idList := make([]int64, 0, len(ids))
+	for id := range ids {
+		idList = append(idList, id)
+	}
+	resolved, _ := users.GetProfiles(ctx, idList)
+	for _, p := range posts {
+		if p == nil {
+			continue
+		}
+		if u, ok := resolved[p.UserID]; ok {
+			p.Username = u.Username
+			p.DisplayName = u.DisplayName
+			p.AvatarURL = u.AvatarURL
+		}
+	}
+}
+
 // finish trims to limit, computes next_cursor/has_more and attaches viewer context.
 func (s *timelineService) finish(ctx context.Context, posts []*repository.Post, viewerID int64, limit int) ([]*repository.Post, int64, bool, error) {
 	hasMore := len(posts) > limit
@@ -165,4 +213,14 @@ func (s *timelineService) attachLikedByViewer(ctx context.Context, posts []*repo
 	for _, p := range posts {
 		p.LikedByViewer = liked[p.ID]
 	}
+}
+
+// appendUnique returns ids with extra appended unless already present.
+func appendUnique(ids []int64, extra int64) []int64 {
+	for _, id := range ids {
+		if id == extra {
+			return ids
+		}
+	}
+	return append(ids, extra)
 }

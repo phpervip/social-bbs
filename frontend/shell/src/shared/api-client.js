@@ -59,14 +59,24 @@ api.interceptors.response.use(
 );
 
 export default {
-  // Auth (dev-only in P1)
-  async devLogin(userId) {
-    const data = await api.post('/dev/login', { user_id: userId });
-    storeToken(data.token);
-    bus.emit(bus.events.AUTH_LOGIN, data.token);
-    return data.token;
-  },
-  devUsers: () => api.get('/dev/users'),
+  // Auth — pure HTTP wrappers. Token persistence + auth:login/auth:logout
+  // bus emits are owned by the consumers (user-remote Auth.jsx) so the
+  // client stays side-effect free; the 401 interceptor below still clears
+  // the token + redirects on expired sessions.
+  register: ({ username, email, password, display_name }) =>
+    api.post('/auth/register', { username, email, password, display_name }),
+  login: ({ account, password }) => api.post('/auth/login', { account, password }),
+  logout: () => api.post('/auth/logout'),
+
+  // User
+  getProfile: (id) => api.get(`/user/${id}`),
+  updateProfile: (patch) => api.put('/user/profile', patch),
+  follow: (id) => api.post(`/user/${id}/follow`),
+  unfollow: (id) => api.delete(`/user/${id}/follow`),
+  getFollowers: ({ id, cursor = 0, limit = 20 } = {}) =>
+    api.get(`/user/${id}/followers`, { params: { cursor, limit } }),
+  getFollowing: ({ id, cursor = 0, limit = 20 } = {}) =>
+    api.get(`/user/${id}/following`, { params: { cursor, limit } }),
 
   // Feed
   createPost: ({ content, media_url }) => api.post('/feed/post', { content, media_url }),

@@ -19,11 +19,12 @@ const config = {
   port: intEnv('GW_PORT', 8080),
   host: strEnv('GW_HOST', '0.0.0.0'),
   feedAddr: strEnv('GW_FEED_ADDR', 'localhost:9000'),
+  userAddr: strEnv('GW_USER_ADDR', 'localhost:9001'),
   jwtSecret: strEnv('JWT_SECRET', 'dev-secret'),
-  jwtTtlSeconds: intEnv('JWT_TTL', 24 * 60 * 60), // 24h, matches /api/dev/login expires_in
+  jwtTtlSeconds: intEnv('JWT_TTL', 24 * 60 * 60), // 24h, matches User Service JWT TTL
   redisAddr: strEnv('GW_REDIS_ADDR', 'localhost:6379'),
   redisPassword: strEnv('GW_REDIS_PASSWORD', ''),
-  corsOrigins: ['http://localhost:3000', 'http://localhost:3001'],
+  corsOrigins: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'],
   bodyLimitBytes: 1024 * 1024, // 1MB
   rate: {
     anonPerMinute: 30,

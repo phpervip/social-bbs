@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>User Remote — 独立开发环境</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --bg-secondary: #f7f9f9;
+        --border: #eff3f4;
+        --text: #0f1419;
+        --text-2: #536471;
+        --brand: #8b5a2b;
+        --brand-2: #c19a6b;
+        --brand-soft: rgba(139, 90, 43, 0.08);
+        --danger: #ff4d4f;
+        --success: #4caf50;
+        --radius: 12px;
+        --font: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--text);
+      }
+      .standalone-nav {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 16px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 14px;
+      }
+      .standalone-nav a {
+        color: var(--brand);
+        text-decoration: none;
+        font-weight: 600;
+        transition: color 150ms ease;
+      }
+      .standalone-nav a:hover { color: var(--brand-2); }
+      .standalone-nav .logout {
+        margin-left: auto;
+        padding: 6px 14px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: transparent;
+        font-family: var(--font);
+        font-size: 13px;
+        color: var(--text-2);
+        cursor: pointer;
+        transition: background-color 150ms ease, color 150ms ease;
+      }
+      .standalone-nav .logout:hover {
+        background: var(--brand-soft);
+        color: var(--brand);
+      }
+      #root {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 0 16px 48px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

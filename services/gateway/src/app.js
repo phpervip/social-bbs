@@ -14,13 +14,16 @@ const { createAuthMiddleware } = require('./middleware/auth');
 const { createRateMiddleware } = require('./middleware/rate');
 const { createBreaker } = require('./middleware/breaker');
 const { createFeedClient } = require('./grpc/feed');
-const { createDevRoutes } = require('./routes/dev');
+const { createUserClient } = require('./grpc/user');
+const { createAuthRoutes } = require('./routes/auth');
+const { createUserRoutes } = require('./routes/user');
 const { createFeedRoutes } = require('./routes/feed');
 
 function buildApp({
   logger = pino({ level: process.env.LOG_LEVEL || 'info' }),
-  redis = null, // Redis-like client (incr/expire); real one created lazily by default
+  redis = null, // Redis-like client (incr/expire/get); real one created lazily by default
   feedClient = null, // injectable gRPC stub for tests
+  userClient = null, // injectable gRPC stub for tests
   breaker = createBreaker(config.breaker),
   jwtSecret = config.jwtSecret,
 } = {}) {
@@ -43,17 +46,19 @@ function buildApp({
     allowedHeaders: ['Authorization', 'Content-Type'],
   });
 
-  // --- Layer 2: auth ---
-  app.addHook('onRequest', createAuthMiddleware({ jwtSecret }));
+  // --- Layer 2: auth (JWT verify + blacklist check via redis) ---
+  app.addHook('onRequest', createAuthMiddleware({ jwtSecret, redis }));
 
   // --- Layer 3: rate limiting ---
   app.addHook('onRequest', createRateMiddleware({ client: redis }));
 
-  // --- Layer 4/5: routes + envelope (forwarding through breaker-wrapped client) ---
-  app.register(createDevRoutes, { jwtSecret });
+  // --- Layer 4/5: routes + envelope (forwarding through breaker-wrapped clients) ---
+  const feed = feedClient || createFeedClient({ address: config.feedAddr, breaker });
+  const user = userClient || createUserClient({ address: config.userAddr, breaker });
 
-  const client = feedClient || createFeedClient({ address: config.feedAddr, breaker });
-  app.register(createFeedRoutes, { feedClient: client });
+  app.register(createAuthRoutes, { userClient: user });
+  app.register(createUserRoutes, { userClient: user });
+  app.register(createFeedRoutes, { feedClient: feed });
 
   // Healthz — no auth, no rate limit (exempt in both middlewares).
   app.get('/healthz', async (_request, reply) => reply.send({ code: 0, message: 'ok', data: null }));
@@ -63,7 +68,8 @@ function buildApp({
     reply.status(404).send({ code: 404, message: 'not_found', data: null })
   );
 
-  app.decorate('feedClient', client);
+  app.decorate('feedClient', feed);
+  app.decorate('userClient', user);
   return app;
 }
 

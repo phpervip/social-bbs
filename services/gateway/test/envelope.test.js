@@ -25,6 +25,7 @@ function stubFeedClient(handlers) {
 const allowRedis = {
   incr: async () => 1,
   expire: async () => 1,
+  get: async () => null,
 };
 
 function makeApp({ handlers = {}, redis = allowRedis } = {}) {
@@ -45,44 +46,6 @@ test('GET /healthz returns envelope without auth', async () => {
   const res = await app.inject({ method: 'GET', url: '/healthz' });
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.json(), { code: 0, message: 'ok', data: null });
-  await app.close();
-});
-
-test('GET /api/dev/users returns hardcoded seed list in envelope', async () => {
-  const app = makeApp();
-  const res = await app.inject({ method: 'GET', url: '/api/dev/users' });
-  assert.equal(res.statusCode, 200);
-  const body = res.json();
-  assert.equal(body.code, 0);
-  assert.equal(body.message, 'success');
-  assert.equal(body.data.length, 4);
-  assert.equal(body.data[0].username, 'bob');
-  assert.equal(body.data[3].username, 'dave');
-  await app.close();
-});
-
-test('POST /api/dev/login signs a valid JWT for a positive user_id', async () => {
-  const app = makeApp();
-  const res = await app.inject({ method: 'POST', url: '/api/dev/login', payload: { user_id: 2 } });
-  assert.equal(res.statusCode, 200);
-  const body = res.json();
-  assert.equal(body.code, 0);
-  assert.equal(body.data.user_id, 2);
-  assert.equal(body.data.expires_in, 86400);
-  assert.equal(typeof body.data.token, 'string');
-
-  const decoded = jwt.verify(body.data.token, SECRET, { algorithms: ['HS256'] });
-  assert.equal(decoded.sub, '2');
-  await app.close();
-});
-
-test('POST /api/dev/login rejects non-positive user_id with 400', async () => {
-  const app = makeApp();
-  for (const payload of [{ user_id: 0 }, { user_id: -3 }, { user_id: 'abc' }, {}]) {
-    const res = await app.inject({ method: 'POST', url: '/api/dev/login', payload });
-    assert.equal(res.statusCode, 400, JSON.stringify(payload));
-    assert.equal(res.json().code, 400);
-  }
   await app.close();
 });
 

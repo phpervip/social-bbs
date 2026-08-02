@@ -1,8 +1,9 @@
-// Command server runs the Feed Service gRPC server (P1).
+// Command server runs the Feed Service gRPC server (P2).
 //
 // Wiring order: config → MySQL (GORM, AutoMigrate + seed) → Redis (go-redis) →
-// repositories → services → fanout worker → gRPC server (+ standard health
-// service) → graceful shutdown (SIGINT/SIGTERM).
+// repositories → User Service client → Kafka client → outbox dispatcher +
+// compensation + Kafka consumers (fanout / follow-changed) → gRPC server (+
+// standard health service) → graceful shutdown (SIGINT/SIGTERM).
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 
 	"social-bbs/feed-service/internal/config"
 	"social-bbs/feed-service/internal/handler"
+	"social-bbs/feed-service/internal/kafka"
 	"social-bbs/feed-service/internal/repository"
 	"social-bbs/feed-service/internal/service"
 	"social-bbs/feed-service/internal/worker"
@@ -66,19 +69,35 @@ func run(logger *slog.Logger) error {
 	logger.Info("redis ready", "addr", cfg.RedisAddr)
 
 	cache := repository.NewRedisCache(rdb)
-	userRepo := repository.NewUserRepo(db)
 	postRepo := repository.NewPostRepo(db)
+	outboxRepo := repository.NewOutboxRepo(db)
 	likeRepo := repository.NewLikeRepo(db)
 	commentRepo := repository.NewCommentRepo(db)
 
-	fanout := worker.NewWorker(cache, userRepo, worker.StubFanoutMode{})
-	defer fanout.Stop()
+	userClient := repository.NewUserClient(cfg.UserAddr, cache)
+	fanout := worker.NewFanoutHandler(cache, userClient)
+	kafkaClient := kafka.NewClient(cfg.KafkaAddr)
+	logger.Info("kafka client ready", "addr", cfg.KafkaAddr)
 
-	postSvc := service.NewPostService(postRepo, userRepo, likeRepo, cache, fanout)
-	timelineSvc := service.NewTimelineService(postRepo, likeRepo, cache)
+	postSvc := service.NewPostService(postRepo, outboxRepo, userClient, likeRepo, cache)
+	timelineSvc := service.NewTimelineService(postRepo, likeRepo, cache, userClient)
 	interactionSvc := service.NewInteractionService(likeRepo, cache)
 	commentSvc := service.NewCommentService(commentRepo, cache)
-	searchSvc := service.NewSearchService(postRepo, likeRepo)
+	searchSvc := service.NewSearchService(postRepo, likeRepo, userClient)
+
+	// P2 workers: outbox dispatcher (resident poll) + compensation (5s ticker)
+	// + the two Kafka consumers (design §5.2/§5.3/§5.4).
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	dispatcher := worker.NewDispatcher(outboxRepo, kafkaClient, logger)
+	consumer := worker.NewConsumer(fanout, postRepo, cache, logger)
+
+	wg.Add(4)
+	go func() { defer wg.Done(); dispatcher.Run(workerCtx) }()
+	go func() { defer wg.Done(); dispatcher.RunCompensation(workerCtx) }()
+	go func() { defer wg.Done(); _ = consumer.RunFanout(workerCtx, kafkaClient.NewFanoutReader()) }()
+	go func() { defer wg.Done(); _ = consumer.RunTimeline(workerCtx, kafkaClient.NewTimelineReader()) }()
+	logger.Info("kafka workers started (outbox dispatcher, compensation, feed-fanout, feed-timeline)")
 
 	grpcSrv := grpc.NewServer()
 	feedpb.RegisterFeedServiceServer(grpcSrv, handler.NewFeedHandler(postSvc, timelineSvc, interactionSvc, commentSvc, searchSvc))
@@ -91,11 +110,13 @@ func run(logger *slog.Logger) error {
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
+		stopWorkers()
 		return err
 	}
 
 	// Graceful shutdown: stop accepting RPCs (draining in-flight handlers so no
-	// new fanout enqueues happen), then drain the worker channel.
+	// new outbox rows are written), then cancel the Kafka workers, wait for them
+	// to drain, and close the external clients.
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -103,11 +124,18 @@ func run(logger *slog.Logger) error {
 		logger.Info("shutdown signal received", "signal", sig.String())
 		healthSrv.Shutdown()
 		grpcSrv.GracefulStop()
-		fanout.Stop()
+		stopWorkers()
+		wg.Wait()
+		_ = kafkaClient.Close()
+		if err := userClient.Close(); err != nil {
+			logger.Warn("user client close failed", "error", err)
+		}
+		_ = rdb.Close()
 	}()
 
 	logger.Info("feed-service listening", "addr", lis.Addr().String())
 	if err := grpcSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		stopWorkers()
 		return err
 	}
 	logger.Info("feed-service stopped cleanly")

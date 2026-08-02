@@ -57,7 +57,7 @@ function createFeedRoutes(app, { feedClient }) {
         user_id: request.user.id,
         content,
         media_url: typeof body.media_url === 'string' ? body.media_url : '',
-      });
+      }, { user: request.user });
       return ok(reply, data);
     } catch (err) {
       return sendError(reply, err);
@@ -72,7 +72,7 @@ function createFeedRoutes(app, { feedClient }) {
       const data = await feedClient.getHomeTimeline({
         user_id: request.user.id,
         page,
-      });
+      }, { user: request.user });
       return ok(reply, data);
     } catch (err) {
       return sendError(reply, err);
@@ -84,7 +84,7 @@ function createFeedRoutes(app, { feedClient }) {
     const id = positiveIdParam(request.params.id, reply);
     if (id === null) return;
     try {
-      const data = await feedClient.getPost({ id, viewer_id: request.user.id });
+      const data = await feedClient.getPost({ id, viewer_id: request.user.id }, { user: request.user });
       return ok(reply, data);
     } catch (err) {
       return sendError(reply, err);
@@ -96,7 +96,7 @@ function createFeedRoutes(app, { feedClient }) {
     const id = positiveIdParam(request.params.id, reply);
     if (id === null) return;
     try {
-      const data = await feedClient.deletePost({ id, user_id: request.user.id });
+      const data = await feedClient.deletePost({ id, user_id: request.user.id }, { user: request.user });
       return ok(reply, isEmptyResponse(data) ? null : data);
     } catch (err) {
       return sendError(reply, err);
@@ -108,7 +108,7 @@ function createFeedRoutes(app, { feedClient }) {
     const postId = positiveIdParam(request.body && request.body.post_id, reply);
     if (postId === null) return;
     try {
-      const data = await feedClient.likePost({ user_id: request.user.id, post_id: postId });
+      const data = await feedClient.likePost({ user_id: request.user.id, post_id: postId }, { user: request.user });
       return ok(reply, isEmptyResponse(data) ? null : data);
     } catch (err) {
       return sendError(reply, err);
@@ -120,7 +120,7 @@ function createFeedRoutes(app, { feedClient }) {
     const postId = positiveIdParam(request.body && request.body.post_id, reply);
     if (postId === null) return;
     try {
-      const data = await feedClient.unlikePost({ user_id: request.user.id, post_id: postId });
+      const data = await feedClient.unlikePost({ user_id: request.user.id, post_id: postId }, { user: request.user });
       return ok(reply, isEmptyResponse(data) ? null : data);
     } catch (err) {
       return sendError(reply, err);
@@ -139,7 +139,7 @@ function createFeedRoutes(app, { feedClient }) {
         post_id: postId,
         user_id: request.user.id,
         content,
-      });
+      }, { user: request.user });
       return ok(reply, data);
     } catch (err) {
       return sendError(reply, err);
@@ -153,7 +153,7 @@ function createFeedRoutes(app, { feedClient }) {
     const page = parsePage(request.query, reply);
     if (!page) return;
     try {
-      const data = await feedClient.getComments({ post_id: id, page });
+      const data = await feedClient.getComments({ post_id: id, page }, { user: request.user });
       return ok(reply, data);
     } catch (err) {
       return sendError(reply, err);
@@ -167,7 +167,7 @@ function createFeedRoutes(app, { feedClient }) {
     const page = parsePage(request.query, reply);
     if (!page) return;
     try {
-      const data = await feedClient.search({ query: q, user_id: request.user.id, page });
+      const data = await feedClient.search({ query: q, user_id: request.user.id, page }, { user: request.user });
       return ok(reply, data);
     } catch (err) {
       return sendError(reply, err);

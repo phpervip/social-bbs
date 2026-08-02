@@ -34,6 +34,23 @@ test('publish endpoint for anon user is still anon tier', () => {
   assert.equal(rateTierFor({ method: 'POST', url: '/api/feed/post', isAuthed: false }), 'anon');
 });
 
+test('follow endpoints classify as publish tier (10/min) for authed users', () => {
+  for (const method of ['POST', 'DELETE']) {
+    assert.equal(rateTierFor({ method, url: '/api/user/1/follow', isAuthed: true }), 'publish', `${method} /api/user/1/follow`);
+    assert.equal(rateTierFor({ method, url: '/api/user/42/follow?x=1', isAuthed: true }), 'publish', `${method} with query string`);
+  }
+  // Read-only user routes stay on the authed tier.
+  assert.equal(rateTierFor({ method: 'GET', url: '/api/user/1/followers', isAuthed: true }), 'authed');
+  assert.equal(rateTierFor({ method: 'GET', url: '/api/user/1/following', isAuthed: true }), 'authed');
+  assert.equal(rateTierFor({ method: 'GET', url: '/api/user/1', isAuthed: true }), 'authed');
+  assert.equal(rateTierFor({ method: 'PUT', url: '/api/user/profile', isAuthed: true }), 'authed');
+  // Non-follow paths with a similar shape must NOT match.
+  assert.equal(rateTierFor({ method: 'POST', url: '/api/user/1/followers', isAuthed: true }), 'authed');
+  assert.equal(rateTierFor({ method: 'POST', url: '/api/user/follow', isAuthed: true }), 'authed');
+  // Anon follow requests stay anon.
+  assert.equal(rateTierFor({ method: 'POST', url: '/api/user/1/follow', isAuthed: false }), 'anon');
+});
+
 test('rate middleware blocks when count exceeds tier limit', async () => {
   let count = 0;
   const mockRedis = {

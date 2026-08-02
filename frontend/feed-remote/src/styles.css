@@ -101,6 +101,19 @@
   flex-wrap: wrap;
 }
 
+.feed-card-author-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+.feed-card-author-link:hover {
+  color: var(--brand);
+}
+
 .feed-card-name {
   font-weight: 700;
   font-size: 15px;

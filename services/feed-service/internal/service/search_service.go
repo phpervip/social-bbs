@@ -15,15 +15,17 @@ type SearchService interface {
 type searchService struct {
 	posts repository.PostRepo
 	likes repository.LikeRepo
+	users repository.UserClient
 }
 
 // NewSearchService wires the search service.
-func NewSearchService(posts repository.PostRepo, likes repository.LikeRepo) SearchService {
-	return &searchService{posts: posts, likes: likes}
+func NewSearchService(posts repository.PostRepo, likes repository.LikeRepo, users repository.UserClient) SearchService {
+	return &searchService{posts: posts, likes: likes, users: users}
 }
 
 // Search runs SELECT ... LIKE '%q%' ... ORDER BY created_at DESC with a
-// created_at cursor (cursor > 0 → strictly older), LIMIT limit+1.
+// created_at cursor (cursor > 0 → strictly older), LIMIT limit+1. Author info
+// is enriched via User Service (P2 D-A8).
 func (s *searchService) Search(ctx context.Context, query string, userID, cursor int64, limit int) ([]*repository.Post, int64, bool, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -34,6 +36,7 @@ func (s *searchService) Search(ctx context.Context, query string, userID, cursor
 	if err != nil {
 		return nil, 0, false, err
 	}
+	enrichAuthors(ctx, s.users, posts)
 	hasMore := len(posts) > limit
 	if hasMore {
 		posts = posts[:limit]

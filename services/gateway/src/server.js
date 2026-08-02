@@ -18,16 +18,18 @@ async function main() {
 
   app.addHook('onClose', async () => {
     redis.close();
-    try {
-      app.feedClient.close && app.feedClient.close();
-    } catch (err) {
-      logger.warn({ err: err.message }, 'failed to close feed client');
+    for (const name of ['feedClient', 'userClient']) {
+      try {
+        app[name].close && app[name].close();
+      } catch (err) {
+        logger.warn({ err: err.message }, `failed to close ${name}`);
+      }
     }
   });
 
   try {
     await app.listen({ port: config.port, host: config.host });
-    logger.info(`gateway listening on ${config.host}:${config.port} (feed: ${config.feedAddr})`);
+    logger.info(`gateway listening on ${config.host}:${config.port} (feed: ${config.feedAddr}, user: ${config.userAddr})`);
   } catch (err) {
     logger.error({ err }, 'gateway failed to start');
     process.exit(1);
