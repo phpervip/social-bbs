@@ -78,16 +78,26 @@ function createUserClient({ address = 'localhost:9001', grpcService = loadDefini
               resolve(response);
             }
           };
+          // grpc-js unary API: client.method(request, metadata, options, callback).
+          // Metadata must be a SEPARATE argument — not nested inside options.
           const opts = { deadline };
+          let md;
           if (callOptions.user && callOptions.user.id != null) {
-            opts.metadata = new grpc.Metadata()
-              .set('x-user-id', String(callOptions.user.id))
-              .set('x-user-name', callOptions.user.username || '');
+            md = new grpc.Metadata();
+            md.set('x-user-id', String(callOptions.user.id));
+            md.set('x-user-name', callOptions.user.username || '');
+          }
+          function doCall() {
+            if (md) {
+              c[methodName](req, md, opts, handler);
+            } else {
+              c[methodName](req, opts, handler);
+            }
           }
           if (waitForReady) {
-            c.waitForReady(deadline, () => c[methodName](req, opts, handler));
+            c.waitForReady(deadline, doCall);
           } else {
-            c[methodName](req, opts, handler);
+            doCall();
           }
         });
 

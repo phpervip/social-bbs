@@ -6,9 +6,18 @@
 // against the Redis blacklist (auth:blacklist:{jti}, written by the User
 // Service on logout); Redis being unavailable degrades open (allow).
 
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 const PUBLIC_PREFIXES = ['/api/auth/register', '/api/auth/login', '/healthz'];
+
+// The User Service signs JWTs with Keys.hmacShaKeyFor(SHA256(jwtSecret))
+// (JwtUtil), i.e. the HMAC key is the SHA-256 digest of the secret. The
+// gateway MUST derive the identical key or every token verification fails
+// with "invalid signature". jsonwebtoken accepts a Buffer key.
+function deriveKey(jwtSecret) {
+  return crypto.createHash('sha256').update(jwtSecret).digest();
+}
 
 function isPublic(url) {
   return PUBLIC_PREFIXES.some((p) => url === p || url.startsWith(p + '/') || url.startsWith(p + '?'));
@@ -32,7 +41,7 @@ function createAuthMiddleware({ jwtSecret, redis = null }) {
 
     let decoded;
     try {
-      decoded = jwt.verify(parsed.token, jwtSecret, { algorithms: ['HS256'] });
+      decoded = jwt.verify(parsed.token, deriveKey(jwtSecret), { algorithms: ['HS256'] });
     } catch (err) {
       request.log?.warn({ err: err.message }, 'jwt verification failed');
       return reply.status(401).send({ code: 401, message: 'unauthorized', data: null });

@@ -21,9 +21,13 @@ type User struct {
 }
 
 // PostRow is the GORM model for the posts table (plan §3.1).
+// All ID/FK columns are declared `bigint unsigned` to match the frozen init
+// schema (infra/mysql/init/01-feed.sql). Without the explicit unsigned type,
+// GORM emits signed bigint for int64, and MySQL rejects the FK constraint
+// (Error 3780) when referencing the unsigned PK (posts.id).
 type PostRow struct {
-	ID           int64          `gorm:"primaryKey"`
-	UserID       int64          `gorm:"index:idx_posts_user"`
+	ID           int64          `gorm:"primaryKey;type:bigint unsigned"`
+	UserID       int64          `gorm:"type:bigint unsigned;index:idx_posts_user"`
 	Content      string         `gorm:"type:text"`
 	MediaURL     string         `gorm:"size:500;default:''"`
 	LikeCount    int64          `gorm:"not null;default:0"`
@@ -39,17 +43,17 @@ func (PostRow) TableName() string { return "posts" }
 
 // PostLike is a like row; the composite PK makes INSERT IGNORE idempotent.
 type PostLike struct {
-	PostID    int64 `gorm:"primaryKey"`
-	UserID    int64 `gorm:"primaryKey"`
+	PostID    int64 `gorm:"primaryKey;type:bigint unsigned"`
+	UserID    int64 `gorm:"primaryKey;type:bigint unsigned"`
 	CreatedAt time.Time
 	Post      PostRow `gorm:"foreignKey:PostID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 // PostComment is a comment on a post.
 type PostComment struct {
-	ID        int64     `gorm:"primaryKey"`
-	PostID    int64     `gorm:"index:idx_comments_post"`
-	UserID    int64     `gorm:"index:idx_comments_user"`
+	ID        int64     `gorm:"primaryKey;type:bigint unsigned"`
+	PostID    int64     `gorm:"type:bigint unsigned;index:idx_comments_post"`
+	UserID    int64     `gorm:"type:bigint unsigned;index:idx_comments_user"`
 	Content   string    `gorm:"size:500"`
 	CreatedAt time.Time `gorm:"index:idx_comments_created"`
 	Post      PostRow   `gorm:"foreignKey:PostID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

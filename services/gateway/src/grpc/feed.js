@@ -79,16 +79,33 @@ function createFeedClient({ address = 'localhost:9000', grpcService = loadDefini
               resolve(response);
             }
           };
+          // grpc-js unary API: client.method(request, metadata, options, callback).
+          // Metadata must be a SEPARATE argument — not nested inside options.
+          // (Putting metadata in opts causes grpc-js to silently discard it,
+          // creating an empty Metadata instead — confirmed via echo server test.)
           const opts = { deadline };
+          let md;
           if (callOptions.user && callOptions.user.id != null) {
-            opts.metadata = new grpc.Metadata()
-              .set('x-user-id', String(callOptions.user.id))
-              .set('x-user-name', callOptions.user.username || '');
+            // @grpc/grpc-js Metadata#set returns void (not this), so each
+            // header must be set on its own statement.
+            md = new grpc.Metadata();
+            md.set('x-user-id', String(callOptions.user.id));
+            md.set('x-user-name', callOptions.user.username || '');
+          }
+          // grpc-js unary API: (request, metadata, options, callback).
+          // When md is present, pass it as the 2nd arg; otherwise fall back
+          // to the original 3-arg form so grpc-js doesn't choke on undefined.
+          function doCall() {
+            if (md) {
+              c[methodName](req, md, opts, handler);
+            } else {
+              c[methodName](req, opts, handler);
+            }
           }
           if (waitForReady) {
-            c.waitForReady(deadline, () => c[methodName](req, opts, handler));
+            c.waitForReady(deadline, doCall);
           } else {
-            c[methodName](req, opts, handler);
+            doCall();
           }
         });
 
