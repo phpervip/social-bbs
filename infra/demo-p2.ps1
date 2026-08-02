@@ -46,8 +46,8 @@ Write-Host "5. Bob posts 3 posts" -ForegroundColor Yellow
 1..3 | ForEach-Object {
     $pBody = @{content="Demo post #$_ at $(Get-Date -Format HH:mm:ss)"} | ConvertTo-Json
     $p = Invoke-WebRequest -Uri "$base/api/feed/post" -Method Post -Body $pBody -ContentType "application/json" -Headers @{Authorization="Bearer $bTok"} -TimeoutSec 15
-    $pId = ($p.Content | ConvertFrom-Json).data.id
-    Write-Host "   post #${_}: $pId" -ForegroundColor Green
+    $postId = ($p.Content | ConvertFrom-Json).data.id
+    Write-Host "   post #${_}: $postId" -ForegroundColor Green
 }
 
 # 6. Alice home timeline (should see bob's posts)
