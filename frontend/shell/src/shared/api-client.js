@@ -94,3 +94,18 @@ export default {
   search: ({ q, cursor = 0, limit = 20 } = {}) =>
     api.get('/search', { params: { q, cursor, limit } }),
 };
+
+// Video (P3) — chunked upload + playback. uploadChunk sends base64 in a JSON
+// body (the gateway decodes Buffer.from(body.data, 'base64')); visibility must
+// be the full proto enum (VIDEO_VISIBILITY_*).
+export const videoApi = {
+  initUpload: (data) => api.post('/video/init-upload', data),
+  uploadChunk: ({ upload_id, part_number, data }) =>
+    api.post('/video/upload-chunk', { upload_id, part_number, data }),
+  completeUpload: (data) => api.post('/video/complete-upload', data),
+  getVideo: (id) => api.get(`/video/${id}`),
+  getPlayback: (id) => api.get(`/video/${id}/playback`),
+  getTranscodeStatus: (id) => api.get(`/video/${id}/transcode-status`),
+  deleteVideo: (id) => api.delete(`/video/${id}`),
+  listUserVideos: (userId, params) => api.get(`/video/user/${userId}`, { params }),
+};

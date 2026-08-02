@@ -3,6 +3,9 @@ node_modules/
 dist/
 build/
 *.log
+# Standalone dev scratch output for the video remote (webpack.standalone.js)
+frontend/video-remote/dev/
+frontend/video-remote/dist-standalone/
 
 # --- Go ---
 bin/

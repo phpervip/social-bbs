@@ -8,6 +8,11 @@ export const EVENTS = Object.freeze({
   AUTH_LOGOUT: 'auth:logout',
   POST_CREATED: 'post:created',
   PROFILE_UPDATED: 'profile:updated',
+  // Video (P3)
+  VIDEO_UPLOAD_START: 'video:upload:start',
+  VIDEO_UPLOAD_DONE: 'video:upload:done',
+  VIDEO_UPLOAD_FAIL: 'video:upload:fail',
+  VIDEO_TRANSCODE_DONE: 'video:transcode:done',
 });
 
 const listeners = new Map();
