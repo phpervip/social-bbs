@@ -51,9 +51,9 @@ Write-Host "5. Bob posts 3 posts" -ForegroundColor Yellow
 # 6. Alice home timeline (should see bob's posts)
 Write-Host "6. Alice home timeline (should see 3 bob posts)" -ForegroundColor Yellow
 Start-Sleep -Seconds 1
-$home = Invoke-RestMethod -Uri "$base/api/feed/home?cursor=0&limit=10" -Headers @{Authorization="Bearer $aTok"} -TimeoutSec 15
-Write-Host "   posts count=$($home.data.posts.Count)" -ForegroundColor Green
-$home.data.posts | ForEach-Object { Write-Host "   - [$($_.user_id)] $($_.content)" }
+$homeData = Invoke-RestMethod -Uri "$base/api/feed/home?cursor=0&limit=10" -Headers @{Authorization="Bearer $aTok"} -TimeoutSec 15
+Write-Host "   posts count=$($homeData.data.posts.Count)" -ForegroundColor Green
+$homeData.data.posts | ForEach-Object { Write-Host "   - [$($_.user_id)] $($_.content)" }
 
 # 7. Alice unfollows bob
 Write-Host "7. Alice unfollows bob" -ForegroundColor Yellow
@@ -70,8 +70,8 @@ Write-Host "   new post id=$newId" -ForegroundColor Green
 # 9. Alice home (should NOT see new post)
 Write-Host "9. Alice home after unfollow (should NOT see new post)" -ForegroundColor Yellow
 Start-Sleep -Seconds 1
-$home2 = Invoke-RestMethod -Uri "$base/api/feed/home?cursor=0&limit=10" -Headers @{Authorization="Bearer $aTok"} -TimeoutSec 15
-$newPostVisible = $home2.data.posts | Where-Object { $_.id -eq $newId }
+$homeData2 = Invoke-RestMethod -Uri "$base/api/feed/home?cursor=0&limit=10" -Headers @{Authorization="Bearer $aTok"} -TimeoutSec 15
+$newPostVisible = $homeData2.data.posts | Where-Object { $_.id -eq $newId }
 if ($newPostVisible) {
     Write-Host "   FAIL: New post visible after unfollow!" -ForegroundColor Red
 } else {
